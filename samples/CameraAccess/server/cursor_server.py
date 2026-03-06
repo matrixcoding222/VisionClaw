@@ -563,15 +563,18 @@ class GazeTracker:
             anchor_result = self._match_anchors(gray, cam_w, cam_h, cam_feats=cam_feats)
             screen_result = self._match_screen_content(cam_feats, cam_w, cam_h)
 
-            # Fuse results: weighted average by inlier count, or pick best
+            # Fuse results: screen content is 3x more trusted (direct pixel coords)
             best = None
             source = None
             if anchor_result and screen_result:
                 a_x, a_y, a_mc, a_conf = anchor_result
                 s_x, s_y, s_mc, s_conf = screen_result
-                total = a_mc + s_mc
-                w_a = a_mc / total
-                w_s = s_mc / total
+                # Screen content gives direct pixel coordinates — weight 3x
+                w_a = a_mc
+                w_s = s_mc * 3.0
+                total = w_a + w_s
+                w_a /= total
+                w_s /= total
                 best = (
                     a_x * w_a + s_x * w_s,
                     a_y * w_a + s_y * w_s,
@@ -653,7 +656,7 @@ class GazeTracker:
         with self._lock:
             anchors = list(self._anchors)
 
-        best = None  # (sx, sy, inliers, confidence, scale)
+        candidates = []  # List of (sx, sy, inliers, confidence, pixel_scale)
 
         for anchor in anchors:
             anc_desc = anchor["descriptors"]
@@ -667,7 +670,7 @@ class GazeTracker:
             for pair in raw:
                 if len(pair) == 2:
                     m, n = pair
-                    if m.distance < 0.85 * n.distance:
+                    if m.distance < 0.75 * n.distance:
                         matches.append(m)
 
             n_matches = len(matches)
@@ -697,23 +700,14 @@ class GazeTracker:
             ax = float(anc_pt[0][0][0])
             ay = float(anc_pt[0][0][1])
 
-            # The anchor was captured when looking at (anchor.screen_x, anchor.screen_y)
-            # with camera center at (anchor.frame_w/2, anchor.frame_h/2).
-            # The offset in anchor space tells us how far the gaze shifted.
             anc_cx = anchor["frame_w"] / 2
             anc_cy = anchor["frame_h"] / 2
             offset_x = ax - anc_cx
             offset_y = ay - anc_cy
 
-            # Scale offset from anchor-pixel-space to screen-pixel-space
-            # The homography scale tells us the magnification
             pixel_scale = np.sqrt(abs(det))
 
-            # Estimate screen pixels per camera pixel from calibration spread
-            # Use full virtual screen size (all monitors)
             scr_ox, scr_oy, scr_w, scr_h = get_screen_size()
-            # Rough scale: the anchor frame covers roughly the screen area
-            # so pixel_scale * (screen_size / frame_size) maps to screen
             cam_to_screen_x = scr_w / anchor["frame_w"] * pixel_scale
             cam_to_screen_y = scr_h / anchor["frame_h"] * pixel_scale
 
@@ -721,21 +715,26 @@ class GazeTracker:
             sy = anchor["screen_y"] + offset_y * cam_to_screen_y
 
             # Clamp
-            scr_ox, scr_oy, total_w, total_h = get_screen_size()
-            sx = max(scr_ox, min(scr_ox + total_w, sx))
-            sy = max(scr_oy, min(scr_oy + total_h, sy))
+            sx = max(scr_ox, min(scr_ox + scr_w, sx))
+            sy = max(scr_oy, min(scr_oy + scr_h, sy))
 
-            candidate = (sx, sy, inliers, confidence, pixel_scale)
+            candidates.append((sx, sy, inliers, confidence, pixel_scale))
 
-            if best is None or inliers > best[2]:
-                best = candidate
+        if not candidates:
+            return None
 
-        if best:
-            # Update scale factor for optical flow
-            self._scale_factor = best[4]
-            return (best[0], best[1], best[2], best[3])
+        # Top-N weighted average: use top 3 anchors by inlier count
+        candidates.sort(key=lambda c: c[2], reverse=True)
+        top = candidates[:3]
 
-        return None
+        total_inliers = sum(c[2] for c in top)
+        avg_x = sum(c[0] * c[2] for c in top) / total_inliers
+        avg_y = sum(c[1] * c[2] for c in top) / total_inliers
+        avg_conf = sum(c[3] * c[2] for c in top) / total_inliers
+        best_scale = top[0][4]
+
+        self._scale_factor = best_scale
+        return (avg_x, avg_y, total_inliers, avg_conf)
 
     def _compute_optical_flow(self, prev_gray, curr_gray):
         """Compute dominant motion between frames using sparse optical flow.
