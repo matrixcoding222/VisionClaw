@@ -370,23 +370,21 @@ def extract_features(gray_img):
 
 
 def decode_camera_frame(jpeg_bytes):
-    """Decode JPEG to grayscale + color, downscale if needed.
+    """Decode JPEG to grayscale, downscale if needed.
 
-    Returns (gray, color_rgb, h, w). color_rgb is for MediaPipe hand detection.
+    Returns (gray, h, w).
     """
     nparr = np.frombuffer(jpeg_bytes, np.uint8)
-    color_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if color_bgr is None:
-        return None, None, 0, 0
-    h, w = color_bgr.shape[:2]
+    img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        return None, 0, 0
+    h, w = img.shape[:2]
     max_dim = max(h, w)
     if max_dim > _MAX_CAM_DIM:
         s = _MAX_CAM_DIM / max_dim
-        color_bgr = cv2.resize(color_bgr, (int(w * s), int(h * s)))
-        h, w = color_bgr.shape[:2]
-    gray = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2GRAY)
-    color_rgb = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2RGB)
-    return gray, color_rgb, h, w
+        img = cv2.resize(img, (int(w * s), int(h * s)))
+        h, w = img.shape[:2]
+    return img, h, w
 
 
 # ---------------------------------------------------------------------------
@@ -610,10 +608,7 @@ class GazeTracker:
         self._screen_lock = threading.Lock()
         self._screen_capture_active = False
 
-        # Hand detection (MediaPipe)
-        self._hand_frame = None
-        self._hand_frame_lock = threading.Lock()
-        self._hand_frame_event = threading.Event()
+        # Hand detection (MediaPipe via Mac webcam — zero network latency)
         self._hand_enabled = True
         self._hand_thread_active = False
         self._pinch = PinchDetector()
@@ -683,7 +678,7 @@ class GazeTracker:
             return {"error": "All points captured"}
 
         # Decode and extract features
-        gray, _color, h, w = decode_camera_frame(jpeg_bytes)
+        gray, h, w = decode_camera_frame(jpeg_bytes)
         if gray is None:
             return {"error": "Bad JPEG"}
 
@@ -757,15 +752,9 @@ class GazeTracker:
         if not self.is_calibrated():
             return None
 
-        gray, color_rgb, cam_h, cam_w = decode_camera_frame(jpeg_bytes)
+        gray, cam_h, cam_w = decode_camera_frame(jpeg_bytes)
         if gray is None:
             return None
-
-        # Share color frame with hand detection thread (non-blocking)
-        if color_rgb is not None and self._hand_enabled:
-            with self._hand_frame_lock:
-                self._hand_frame = color_rgb
-            self._hand_frame_event.set()
 
         t0 = time.time()
         self._frame_count += 1
@@ -1195,20 +1184,34 @@ class GazeTracker:
     # -- Hand detection (MediaPipe) --
 
     def start_hand_detection(self):
-        """Start background thread for MediaPipe hand detection."""
+        """Start background thread for hand detection via Mac webcam."""
         if self._hand_thread_active:
             return
         self._hand_thread_active = True
         t = threading.Thread(target=self._hand_detection_loop, daemon=True)
         t.start()
-        print("[Hand] Detection started (MediaPipe Hands)", flush=True)
+        print("[Hand] Detection started (Mac webcam + MediaPipe)", flush=True)
 
     def _hand_detection_loop(self):
-        """Background: detect hands and process pinch gestures."""
+        """Background: capture from Mac webcam, detect hands, process pinch."""
         model_path = os.path.join(os.path.dirname(__file__), "hand_landmarker.task")
         if not os.path.exists(model_path):
             print("[Hand] hand_landmarker.task not found - hand detection disabled", flush=True)
             return
+
+        # Open Mac webcam (index 0)
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            print("[Hand] Could not open webcam - hand detection disabled", flush=True)
+            return
+
+        # Set resolution and frame rate for speed
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_FPS, 30)
+        print(f"[Hand] Webcam opened: {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x"
+              f"{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))} @ "
+              f"{int(cap.get(cv2.CAP_PROP_FPS))}fps", flush=True)
 
         options = HandLandmarkerOptions(
             base_options=MPBaseOptions(model_asset_path=model_path),
@@ -1220,29 +1223,23 @@ class GazeTracker:
         )
         landmarker = HandLandmarker.create_from_options(options)
         no_hand_count = 0
-        frame_idx = 0
         log_counter = 0
 
         while self._hand_thread_active:
-            # Wait for a new frame (timeout 1s to allow clean shutdown)
-            if not self._hand_frame_event.wait(timeout=1.0):
-                continue
-            self._hand_frame_event.clear()
-
             if not self._hand_enabled:
+                time.sleep(0.1)
                 continue
 
-            with self._hand_frame_lock:
-                frame = self._hand_frame
-                self._hand_frame = None
-
-            if frame is None:
+            ret, bgr_frame = cap.read()
+            if not ret:
+                time.sleep(0.01)
                 continue
 
-            frame_idx += 1
             t0 = time.time()
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
-            # VIDEO mode: uses temporal tracking (faster after first detection)
+            # Flip horizontally so hand right = cursor right
+            bgr_frame = cv2.flip(bgr_frame, 1)
+            rgb_frame = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
             timestamp_ms = int(time.time() * 1000)
             results = landmarker.detect_for_video(mp_image, timestamp_ms)
             dt_ms = (time.time() - t0) * 1000
@@ -1272,9 +1269,9 @@ class GazeTracker:
                     if self._kalman.initialized:
                         self._kalman.apply_flow(hdx, hdy)
 
-                # Log distance periodically so we can tune thresholds
+                # Log periodically
                 log_counter += 1
-                if action is not None or log_counter % 30 == 0:
+                if action is not None or log_counter % 60 == 0:
                     print(f"[Hand] {dt_ms:.0f}ms dist={self._pinch.distance:.3f} "
                           f"state={self._pinch.state.value}", flush=True)
 
@@ -1282,7 +1279,7 @@ class GazeTracker:
                     self._execute_pinch_action(action)
             else:
                 no_hand_count += 1
-                if no_hand_count > 3:
+                if no_hand_count > 5:
                     if self._pinch.hand_detected:
                         print(f"[Hand] Lost ({dt_ms:.0f}ms)", flush=True)
                     action = self._pinch.on_hand_lost()
@@ -1290,6 +1287,8 @@ class GazeTracker:
                         self._execute_pinch_action(action)
 
         landmarker.close()
+        cap.release()
+        print("[Hand] Webcam released", flush=True)
 
     def _execute_pinch_action(self, action):
         """Execute a pinch action at the current Kalman cursor position."""
