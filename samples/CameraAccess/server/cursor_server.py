@@ -365,6 +365,8 @@ class GazeTracker:
         self._anchors = []
         self._calibrating = False
         self._cal_index = 0  # Current calibration point index
+        self._cal_screen_ox = 0
+        self._cal_screen_oy = 0
         self._cal_screen_w = 0
         self._cal_screen_h = 0
 
@@ -388,7 +390,10 @@ class GazeTracker:
             self._anchors = []
             self._calibrating = True
             self._cal_index = 0
-            w, h = get_primary_screen_logical()
+            # Use full virtual screen bounds (all monitors)
+            ox, oy, w, h = get_screen_size()
+            self._cal_screen_ox = ox
+            self._cal_screen_oy = oy
             self._cal_screen_w = w
             self._cal_screen_h = h
             self._prev_gray = None
@@ -396,9 +401,11 @@ class GazeTracker:
 
         # Show first dot
         nx, ny = self.CALIBRATION_POINTS_9[0]
-        sx, sy = int(nx * self._cal_screen_w), int(ny * self._cal_screen_h)
+        sx = int(self._cal_screen_ox + nx * self._cal_screen_w)
+        sy = int(self._cal_screen_oy + ny * self._cal_screen_h)
         show_calibration_dot(sx, sy)
-        print(f"[Calibrate] Started. Point 0: ({sx}, {sy})", flush=True)
+        print(f"[Calibrate] Started. Point 0: ({sx}, {sy}) "
+              f"[screen: {w}x{h} at ({ox},{oy})]", flush=True)
         return {
             "point_index": 0,
             "total_points": len(self.CALIBRATION_POINTS_9),
@@ -422,10 +429,10 @@ class GazeTracker:
 
         feats = extract_features(gray)
 
-        # Store anchor
+        # Store anchor (absolute screen coordinates including origin offset)
         nx, ny = self.CALIBRATION_POINTS_9[idx]
-        sx = nx * self._cal_screen_w
-        sy = ny * self._cal_screen_h
+        sx = self._cal_screen_ox + nx * self._cal_screen_w
+        sy = self._cal_screen_oy + ny * self._cal_screen_h
 
         anchor = {
             "screen_x": sx,
@@ -448,8 +455,8 @@ class GazeTracker:
         next_idx = idx + 1
         if next_idx < len(self.CALIBRATION_POINTS_9):
             nx2, ny2 = self.CALIBRATION_POINTS_9[next_idx]
-            sx2 = int(nx2 * self._cal_screen_w)
-            sy2 = int(ny2 * self._cal_screen_h)
+            sx2 = int(self._cal_screen_ox + nx2 * self._cal_screen_w)
+            sy2 = int(self._cal_screen_oy + ny2 * self._cal_screen_h)
             show_calibration_dot(sx2, sy2)
             return {
                 "status": "captured",
@@ -605,8 +612,8 @@ class GazeTracker:
             pixel_scale = np.sqrt(abs(det))
 
             # Estimate screen pixels per camera pixel from calibration spread
-            # Use the known screen size and typical head-viewing geometry
-            scr_w, scr_h = get_primary_screen_logical()
+            # Use full virtual screen size (all monitors)
+            scr_ox, scr_oy, scr_w, scr_h = get_screen_size()
             # Rough scale: the anchor frame covers roughly the screen area
             # so pixel_scale * (screen_size / frame_size) maps to screen
             cam_to_screen_x = scr_w / anchor["frame_w"] * pixel_scale
