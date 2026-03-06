@@ -22,10 +22,8 @@ class GazeControlViewModel: ObservableObject {
 
   private var lastSendTime: Date = .distantPast
   private var smoothedPoint: CGPoint?
+  private var targetPoint: CGPoint?  // Where we're heading
   private var isLocateInFlight = false
-  private var velocity: CGPoint = .zero
-  private var lastRawPoint: CGPoint?
-  private var lastUpdateTime: Date = .distantPast
   private var interpolationTimer: Timer?
 
   // MARK: - Session Control
@@ -61,8 +59,7 @@ class GazeControlViewModel: ObservableObject {
     mode = .connecting
     gazeScreenPoint = nil
     smoothedPoint = nil
-    velocity = .zero
-    lastRawPoint = nil
+    targetPoint = nil
     isLocateInFlight = false
     matchCount = 0
     confidence = 0.0
@@ -151,28 +148,30 @@ class GazeControlViewModel: ObservableObject {
     interpolationTimer = nil
   }
 
+  /// 60fps lerp: smoothly move cursor toward target
   private func interpolate() {
-    guard let current = smoothedPoint else { return }
-    let speed = sqrt(velocity.x * velocity.x + velocity.y * velocity.y)
-    guard speed > 2.0 else { return }  // Only interpolate if moving
+    guard let target = targetPoint, let current = smoothedPoint else { return }
 
-    // Decay velocity over time
-    let decay: CGFloat = 0.92
-    velocity = CGPoint(x: velocity.x * decay, y: velocity.y * decay)
+    let dx = target.x - current.x
+    let dy = target.y - current.y
+    let dist = sqrt(dx * dx + dy * dy)
 
-    let dt: CGFloat = 1.0 / 60.0
-    let predicted = clampToScreen(CGPoint(
-      x: current.x + velocity.x * dt,
-      y: current.y + velocity.y * dt
-    ))
+    guard dist > 0.5 else { return }  // Close enough, skip
 
-    smoothedPoint = predicted
-    gazeScreenPoint = predicted
+    // Lerp factor per frame: ~20% per frame at 60fps gives smooth catch-up
+    let lerp: CGFloat = 0.15
+    let next = CGPoint(
+      x: current.x + dx * lerp,
+      y: current.y + dy * lerp
+    )
+
+    smoothedPoint = next
+    gazeScreenPoint = next
 
     if isDragging {
-      cursorBridge.mouseDragTo(predicted)
+      cursorBridge.mouseDragTo(next)
     } else {
-      cursorBridge.moveCursor(to: predicted)
+      cursorBridge.moveCursor(to: next)
     }
   }
 
@@ -187,46 +186,16 @@ class GazeControlViewModel: ObservableObject {
     )
   }
 
+  /// Server returned a new point — set it as the target, timer will lerp toward it
   private func applySmoothedPoint(_ raw: CGPoint) {
     let clamped = clampToScreen(raw)
-    let now = Date()
+    targetPoint = clamped
 
-    if let prev = smoothedPoint {
-      // Adaptive alpha: faster response when moving fast
-      let dx = clamped.x - prev.x
-      let dy = clamped.y - prev.y
-      let distance = sqrt(dx * dx + dy * dy)
-      let alpha = min(0.6, max(0.15, distance / 500.0))
-
-      let newPoint = CGPoint(
-        x: prev.x + alpha * (clamped.x - prev.x),
-        y: prev.y + alpha * (clamped.y - prev.y)
-      )
-
-      // Track velocity (pixels per second)
-      let dt = now.timeIntervalSince(lastUpdateTime)
-      if dt > 0 && dt < 1.0 {
-        let vx = (newPoint.x - prev.x) / dt
-        let vy = (newPoint.y - prev.y) / dt
-        velocity = CGPoint(x: vx * 0.7 + velocity.x * 0.3, y: vy * 0.7 + velocity.y * 0.3)
-      }
-
-      smoothedPoint = newPoint
-    } else {
+    // First point: jump directly
+    if smoothedPoint == nil {
       smoothedPoint = clamped
-      velocity = .zero
-    }
-
-    lastUpdateTime = now
-    lastRawPoint = clamped
-    gazeScreenPoint = smoothedPoint
-
-    guard let point = smoothedPoint else { return }
-
-    if isDragging {
-      cursorBridge.mouseDragTo(point)
-    } else {
-      cursorBridge.moveCursor(to: point)
+      gazeScreenPoint = clamped
+      cursorBridge.moveCursor(to: clamped)
     }
   }
 }
