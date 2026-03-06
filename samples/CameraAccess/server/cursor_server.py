@@ -319,10 +319,18 @@ class GazeKalmanFilter:
         return x, y
 
     def apply_flow(self, dx_screen, dy_screen):
-        """Apply optical flow delta directly to state."""
+        """Apply optical flow delta to position and decay velocity.
+
+        Velocity decay prevents drift accumulation between anchor updates.
+        Without decay, small systematic flow biases (JPEG artifacts, lighting)
+        build up velocity that carries the cursor away.
+        """
         if self.initialized:
             self.x[0] += dx_screen
             self.x[1] += dy_screen
+            # Decay velocity to resist drift when no anchor corrects
+            self.x[2] *= 0.85
+            self.x[3] *= 0.85
 
 
 _device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -906,7 +914,7 @@ class GazeTracker:
         interval = 1.0 / 60.0
         vx, vy = 0.0, 0.0
         # Spring parameters: omega = natural frequency, zeta = 1.0 = critical damping
-        omega = 12.0  # Higher = faster response (but >15 can feel twitchy)
+        omega = 10.0  # Higher = faster response (but >12 can feel twitchy)
 
         while self._cursor_thread_active:
             with self._cursor_lock:
@@ -920,7 +928,7 @@ class GazeTracker:
                 dy = ty - cy
                 dist = math.sqrt(dx * dx + dy * dy)
 
-                if dist > 0.3:
+                if dist > 1.0:
                     # Critically damped spring: zeta = 1.0
                     # acceleration = omega^2 * (target - pos) - 2 * omega * velocity
                     dt = interval
