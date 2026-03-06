@@ -41,7 +41,7 @@ struct GazeStatusBar: View {
   }
 
   private var calibrationText: String {
-    "\(gazeVM.calibrationCount)/4 QR"
+    "\(gazeVM.calibrationCount)/4"
   }
 }
 
@@ -56,7 +56,7 @@ struct GazeOverlayView: View {
       // Mode and coordinate info
       VStack(spacing: 6) {
         if gazeVM.mode == .calibrating {
-          Text("Point glasses at screen with QR codes")
+          Text("Point glasses at screen with colored markers")
             .font(.system(size: 14, weight: .medium))
             .foregroundColor(.white)
             .padding(.horizontal, 16)

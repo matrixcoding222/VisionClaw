@@ -6,8 +6,8 @@ import simd
 class HomographyService {
   private var homographyMatrix: simd_double3x3?
 
-  /// Calibrate the homography from detected marker centers (normalized 0..1 Vision coords)
-  /// to screen coordinates (pixels).
+  /// Calibrate the homography from detected marker centers (normalized 0..1, origin top-left)
+  /// to screen coordinates (pixels, origin top-left).
   func calibrate(
     markerCenters: [String: CGPoint],
     screenSize: CGSize
@@ -20,11 +20,10 @@ class HomographyService {
       return false
     }
 
-    // Source points: marker centers in Vision normalized coords (origin bottom-left)
+    // Source points: marker blob centers in image coords (normalized 0..1, origin top-left)
     let srcPoints = [tl, tr, bl, br]
 
     // Destination points: corresponding screen corners (origin top-left)
-    // Vision coords have Y flipped relative to screen coords
     // TL marker -> screen (0, 0), TR -> (w, 0), BL -> (0, h), BR -> (w, h)
     let dstPoints = [
       CGPoint(x: 0, y: 0),
@@ -37,7 +36,7 @@ class HomographyService {
     return homographyMatrix != nil
   }
 
-  /// Map a point from camera/Vision normalized coordinates to screen coordinates.
+  /// Map a point from normalized image coordinates (0..1, origin top-left) to screen coordinates.
   func mapPoint(_ point: CGPoint) -> CGPoint? {
     guard let H = homographyMatrix else { return nil }
 

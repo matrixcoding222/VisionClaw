@@ -69,23 +69,18 @@ class GazeControlViewModel: ObservableObject {
     guard now.timeIntervalSince(lastSendTime) >= GazeConfig.gazeUpdateInterval else { return }
     lastSendTime = now
 
-    Task {
-      let result = await markerDetector.detectMarkers(in: image)
+    let result = markerDetector.detectMarkers(in: image)
+    calibrationCount = result.detectedCount
 
-      await MainActor.run {
-        self.calibrationCount = result.detectedCount
-
-        if result.isFullyCalibrated {
-          self.updateCalibration(result)
-          self.updateGazePoint(image: image)
-        } else if self.mode == .calibrating {
-          // Still waiting for all 4 markers
-        } else {
-          // Lost calibration - use last known homography if available
-          if self.homography.isCalibrated {
-            self.updateGazePoint(image: image)
-          }
-        }
+    if result.isFullyCalibrated {
+      updateCalibration(result)
+      updateGazePoint(image: image)
+    } else if mode == .calibrating {
+      // Still waiting for all 4 markers
+    } else {
+      // Lost calibration - use last known homography if available
+      if homography.isCalibrated {
+        updateGazePoint(image: image)
       }
     }
   }
@@ -143,7 +138,7 @@ class GazeControlViewModel: ObservableObject {
     guard homography.isCalibrated else { return }
 
     // The "gaze point" is the center of the camera frame
-    // In Vision normalized coordinates (0..1, origin bottom-left):
+    // In normalized image coordinates (0..1, origin top-left):
     // center = (0.5, 0.5)
     let frameCenter = CGPoint(x: 0.5, y: 0.5)
 

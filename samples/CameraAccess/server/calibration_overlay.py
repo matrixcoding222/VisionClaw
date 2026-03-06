@@ -1,53 +1,27 @@
 #!/usr/bin/env python3
 """
-Calibration Overlay - Displays 4 QR codes at screen corners.
+Calibration Overlay - Displays 4 large colored squares at screen corners.
 
-The iOS app detects these QR codes to establish a mapping between the
-camera's field of view and the Mac screen coordinates.
+Colors are chosen for easy detection even at low camera resolutions:
+  TL = Red, TR = Green, BL = Blue, BR = Yellow
 
 Usage:
-  pip install qrcode Pillow
   python calibration_overlay.py
 
 Press Escape or Q to quit.
 """
 
-import sys
 import tkinter as tk
-from io import BytesIO
 
-try:
-    import qrcode
-    from PIL import Image, ImageTk
-except ImportError:
-    print("Missing dependencies. Install with:")
-    print("  pip install qrcode Pillow")
-    sys.exit(1)
+MARKER_SIZE = 300
+MARGIN = 20
 
-
-MARKER_SIZE = 120
-MARGIN = 40
-
-MARKERS = {
-    "TL": "nw",  # top-left
-    "TR": "ne",  # top-right
-    "BL": "sw",  # bottom-left
-    "BR": "se",  # bottom-right
+COLORS = {
+    "TL": "#FF0000",  # Red
+    "TR": "#00FF00",  # Green
+    "BL": "#0000FF",  # Blue
+    "BR": "#FFFF00",  # Yellow
 }
-
-
-def generate_qr(data, size):
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_H,
-        box_size=10,
-        border=2,
-    )
-    qr.add_data(data)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    img = img.resize((size, size), Image.NEAREST)
-    return img
 
 
 class CalibrationOverlay:
@@ -61,7 +35,7 @@ class CalibrationOverlay:
 
         self.root.geometry(f"{screen_w}x{screen_h}+0+0")
         self.root.configure(bg="black")
-        self.root.attributes("-alpha", 0.85)
+        self.root.attributes("-alpha", 0.9)
 
         self.canvas = tk.Canvas(
             self.root,
@@ -72,8 +46,6 @@ class CalibrationOverlay:
         )
         self.canvas.pack()
 
-        self.qr_images = []
-
         positions = {
             "TL": (MARGIN, MARGIN),
             "TR": (screen_w - MARGIN - MARKER_SIZE, MARGIN),
@@ -82,25 +54,16 @@ class CalibrationOverlay:
         }
 
         for label, (x, y) in positions.items():
-            pil_img = generate_qr(label, MARKER_SIZE)
-            tk_img = ImageTk.PhotoImage(pil_img)
-            self.qr_images.append(tk_img)
-            self.canvas.create_image(x, y, anchor="nw", image=tk_img)
-
-            # Label below/above the QR code
-            label_y = y + MARKER_SIZE + 10 if "T" in label else y - 20
-            self.canvas.create_text(
-                x + MARKER_SIZE // 2,
-                label_y,
-                text=label,
-                fill="white",
-                font=("Helvetica", 14, "bold"),
+            color = COLORS[label]
+            self.canvas.create_rectangle(
+                x, y, x + MARKER_SIZE, y + MARKER_SIZE,
+                fill=color, outline=color,
             )
 
         self.canvas.create_text(
             screen_w // 2,
             screen_h // 2,
-            text=f"Gaze Calibration\n{screen_w}x{screen_h}\nLook at each QR code\nPress ESC to close",
+            text=f"Gaze Calibration\n{screen_w}x{screen_h}\n\nRed=TL  Green=TR\nBlue=BL  Yellow=BR\n\nPress ESC to close",
             fill="white",
             font=("Helvetica", 24, "bold"),
             justify="center",
@@ -111,7 +74,9 @@ class CalibrationOverlay:
         self.root.bind("Q", lambda e: self.root.destroy())
 
     def run(self):
-        print("[Calibration] Overlay active. Press ESC or Q to close.")
+        print("[Calibration] Overlay active with colored squares.")
+        print("[Calibration] TL=Red, TR=Green, BL=Blue, BR=Yellow")
+        print("[Calibration] Press ESC or Q to close.")
         self.root.mainloop()
 
 
