@@ -379,9 +379,9 @@ class GazeTracker:
         self._frame_count = 0  # Frames since last anchor match
         self._anchor_interval = 5  # Do anchor matching every N frames
 
-        # Screen content layer (hybrid matching)
-        self._screen_feats = None  # Latest screenshot SuperPoint features
-        self._screen_meta = None   # {left, top, width, height, scale}
+        # Screen content layer (per-monitor, retina-aware)
+        self._screen_monitors = []  # List of (monitor, feats, retina_scale, feat_scale)
+        self._screen_last_matched_idx = 0  # Prioritize last matched monitor
         self._screen_lock = threading.Lock()
         self._screen_capture_active = False
 
@@ -805,106 +805,136 @@ class GazeTracker:
         print("[ScreenContent] Background capture started (every 3s)", flush=True)
 
     def _screen_capture_loop(self):
-        """Background: capture screenshot + extract features periodically."""
-        _MAX_SCREEN_DIM = 1024
-        sct = mss.mss()
+        """Background: capture per-monitor screenshots + extract features."""
+        _MAX_SCREEN_DIM = 1600
         while self._screen_capture_active:
             try:
-                monitor = sct.monitors[0]  # Full virtual screen
-                screenshot = sct.grab(monitor)
-                img = np.array(screenshot)
-                gray = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
+                monitors = []
+                logical_w = Quartz.CGDisplayPixelsWide(Quartz.CGMainDisplayID())
 
-                h, w = gray.shape[:2]
-                scale = 1.0
-                max_dim = max(h, w)
-                if max_dim > _MAX_SCREEN_DIM:
-                    scale = max_dim / _MAX_SCREEN_DIM
-                    gray = cv2.resize(gray, (int(w / scale), int(h / scale)))
+                with mss.mss() as sct:
+                    primary_w = sct.monitors[1]["width"] if len(sct.monitors) > 1 else 1
+                    retina_scale = primary_w / logical_w if logical_w > 0 else 1.0
 
-                feats = extract_features(gray)
-                meta = {
-                    "left": monitor["left"],
-                    "top": monitor["top"],
-                    "width": monitor["width"],
-                    "height": monitor["height"],
-                    "scale": scale,
-                }
+                    for mon in sct.monitors[1:]:  # Skip virtual screen [0]
+                        screenshot = sct.grab(mon)
+                        img = np.array(screenshot)[:, :, :3]
+                        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                        sh, sw = gray.shape[:2]
+                        feat_scale = 1.0
+                        max_dim = max(sh, sw)
+                        if max_dim > _MAX_SCREEN_DIM:
+                            feat_scale = _MAX_SCREEN_DIM / max_dim
+                            gray = cv2.resize(gray, (int(sw * feat_scale), int(sh * feat_scale)))
+                        feats = extract_features(gray)
+                        monitors.append((mon, feats, retina_scale, feat_scale))
 
                 with self._screen_lock:
-                    self._screen_feats = feats
-                    self._screen_meta = meta
+                    self._screen_monitors = monitors
 
             except Exception as e:
                 print(f"[ScreenContent] Capture error: {e}", flush=True)
 
-            time.sleep(3.0)
+            time.sleep(2.0)
 
-    def _match_screen_content(self, cam_feats, cam_w, cam_h, min_matches=8):
-        """Match camera frame against latest screenshot.
+    def _match_screen_content(self, cam_feats, cam_w, cam_h, min_matches=10):
+        """Match camera frame against per-monitor screenshots.
+
+        Uses retina scaling and per-monitor feature extraction from the
+        old ScreenshotCache approach for better accuracy.
 
         Returns (screen_x, screen_y, match_count, confidence) or None.
         """
         with self._screen_lock:
-            feats = self._screen_feats
-            meta = self._screen_meta
-
-        if feats is None or meta is None:
-            return None
+            if not self._screen_monitors:
+                return None
+            monitors = list(self._screen_monitors)
+            start_idx = self._screen_last_matched_idx
 
         cam_desc = cam_feats["descriptors"]
         cam_kps = cam_feats["keypoints"]
-        scr_desc = feats["descriptors"]
-        scr_kps = feats["keypoints"]
 
-        if len(cam_desc) < 2 or len(scr_desc) < 2:
+        if len(cam_desc) < 2:
             return None
 
-        raw = _bf.knnMatch(cam_desc, scr_desc, k=2)
-        matches = []
-        for pair in raw:
-            if len(pair) == 2:
-                m, n = pair
-                if m.distance < 0.80 * n.distance:
-                    matches.append(m)
+        # Try last matched monitor first for faster convergence
+        order = [start_idx] + [i for i in range(len(monitors)) if i != start_idx]
+        if start_idx >= len(monitors):
+            order = list(range(len(monitors)))
 
-        if len(matches) < min_matches:
-            return None
+        best = None  # (sx, sy, inliers, confidence, idx)
 
-        src_pts = cam_kps[[m.queryIdx for m in matches]].reshape(-1, 1, 2)
-        dst_pts = scr_kps[[m.trainIdx for m in matches]].reshape(-1, 1, 2)
+        for idx in order:
+            mon, screen_feats, retina_scale, feat_scale = monitors[idx]
 
-        H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-        if H is None:
-            return None
+            scr_desc = screen_feats["descriptors"]
+            scr_kps = screen_feats["keypoints"]
 
-        inliers = int(mask.sum()) if mask is not None else 0
-        if inliers < min_matches:
-            return None
+            if len(scr_desc) < 2:
+                continue
 
-        det = np.linalg.det(H[:2, :2])
-        if det < 0.01 or det > 100.0:
-            return None
+            raw = _bf.knnMatch(cam_desc, scr_desc, k=2)
+            matches = []
+            for pair in raw:
+                if len(pair) == 2:
+                    m, n = pair
+                    if m.distance < 0.85 * n.distance:
+                        matches.append(m)
 
-        confidence = inliers / len(matches) if matches else 0.0
+            if len(matches) < min_matches:
+                continue
 
-        # Project camera center to screenshot space
-        cam_center = np.float32([[cam_w / 2, cam_h / 2]]).reshape(-1, 1, 2)
-        scr_pt = cv2.perspectiveTransform(cam_center, H)
-        px = float(scr_pt[0][0][0])
-        py = float(scr_pt[0][0][1])
+            src_pts = cam_kps[[m.queryIdx for m in matches]].reshape(-1, 1, 2)
+            dst_pts = scr_kps[[m.trainIdx for m in matches]].reshape(-1, 1, 2)
 
-        # Scale from downscaled screenshot to actual screen coordinates
-        scale = meta["scale"]
-        screen_x = meta["left"] + px * scale
-        screen_y = meta["top"] + py * scale
+            H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 10.0)
+            if H is None:
+                continue
 
-        # Clamp to screen bounds
-        scr_ox, scr_oy, scr_w, scr_h = get_screen_size()
-        screen_x = max(scr_ox, min(scr_ox + scr_w, screen_x))
-        screen_y = max(scr_oy, min(scr_oy + scr_h, screen_y))
+            inliers = int(mask.sum()) if mask is not None else 0
+            if inliers < min_matches:
+                continue
 
-        return (screen_x, screen_y, inliers, confidence)
+            det = np.linalg.det(H[:2, :2])
+            if det < 0.1 or det > 10.0:
+                continue
+
+            confidence = inliers / len(matches) if matches else 0.0
+
+            # Project camera center to screenshot space
+            cam_center = np.float32([[cam_w / 2, cam_h / 2]]).reshape(-1, 1, 2)
+            screen_pt = cv2.perspectiveTransform(cam_center, H)
+            sx = float(screen_pt[0][0][0])
+            sy = float(screen_pt[0][0][1])
+
+            # Scale back: feature space -> retina pixels -> logical points
+            sx = mon["left"] + sx / feat_scale / retina_scale
+            sy = mon["top"] + sy / feat_scale / retina_scale
+
+            # Clamp to this monitor's logical bounds
+            mon_w = mon["width"] / retina_scale
+            mon_h = mon["height"] / retina_scale
+            mon_left = mon["left"] / retina_scale if retina_scale > 1 else mon["left"]
+            mon_top = mon["top"] / retina_scale if retina_scale > 1 else mon["top"]
+            sx = max(mon_left, min(mon_left + mon_w, sx))
+            sy = max(mon_top, min(mon_top + mon_h, sy))
+
+            # Early exit if confident match on preferred monitor
+            if confidence >= 0.25:
+                with self._screen_lock:
+                    self._screen_last_matched_idx = idx
+                return (sx, sy, inliers, confidence)
+
+            candidate = (sx, sy, inliers, confidence, idx)
+            if best is None or inliers > best[2]:
+                best = candidate
+
+        if best:
+            with self._screen_lock:
+                self._screen_last_matched_idx = best[4]
+            return (best[0], best[1], best[2], best[3])
+
+        return None
 
 
 # ---------------------------------------------------------------------------
