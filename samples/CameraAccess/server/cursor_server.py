@@ -42,7 +42,7 @@ def get_screen_size():
     when monitors extend to the left of or above the primary display.
     """
     max_displays = 16
-    (display_ids, count, err) = Quartz.CGGetActiveDisplayList(max_displays, None, None)
+    (err, display_ids, count) = Quartz.CGGetActiveDisplayList(max_displays, None, None)
     if err != 0 or count == 0:
         # Fallback to primary
         did = Quartz.CGMainDisplayID()
