@@ -63,6 +63,9 @@ class StreamSessionViewModel: ObservableObject {
   // WebRTC Live streaming integration
   var webrtcSessionVM: WebRTCSessionViewModel?
 
+  // Gaze Control integration
+  var gazeControlVM: GazeControlViewModel?
+
   // The core DAT SDK StreamSession - handles all streaming operations
   private var streamSession: StreamSession
   // Listener tokens are used to manage DAT SDK event subscriptions
@@ -131,6 +134,8 @@ class StreamSessionViewModel: ObservableObject {
           self.geminiSessionVM?.sendVideoFrameIfThrottled(image: image)
           // Forward video frames to WebRTC (no throttle — WebRTC handles bitrate)
           self.webrtcSessionVM?.pushVideoFrame(image)
+          // Forward video frames to Gaze Control (throttled internally to ~15fps)
+          self.gazeControlVM?.processFrame(image)
         }
       }
     }
@@ -224,6 +229,7 @@ class StreamSessionViewModel: ObservableObject {
         }
         self.geminiSessionVM?.sendVideoFrameIfThrottled(image: image)
         self.webrtcSessionVM?.pushVideoFrame(image)
+        self.gazeControlVM?.processFrame(image)
       }
     }
     camera.start()

@@ -13,6 +13,8 @@ final class SettingsManager {
     case openClawGatewayToken
     case geminiSystemPrompt
     case webrtcSignalingURL
+    case cursorServerHost
+    case cursorServerPort
   }
 
   private init() {}
@@ -61,11 +63,27 @@ final class SettingsManager {
     set { defaults.set(newValue, forKey: Key.webrtcSignalingURL.rawValue) }
   }
 
+  // MARK: - Gaze Control
+
+  var cursorServerHost: String {
+    get { defaults.string(forKey: Key.cursorServerHost.rawValue) ?? Secrets.cursorServerHost }
+    set { defaults.set(newValue, forKey: Key.cursorServerHost.rawValue) }
+  }
+
+  var cursorServerPort: Int {
+    get {
+      let stored = defaults.integer(forKey: Key.cursorServerPort.rawValue)
+      return stored != 0 ? stored : Secrets.cursorServerPort
+    }
+    set { defaults.set(newValue, forKey: Key.cursorServerPort.rawValue) }
+  }
+
   // MARK: - Reset
 
   func resetAll() {
     for key in [Key.geminiAPIKey, .geminiSystemPrompt, .openClawHost, .openClawPort,
-                .openClawHookToken, .openClawGatewayToken, .webrtcSignalingURL] {
+                .openClawHookToken, .openClawGatewayToken, .webrtcSignalingURL,
+                .cursorServerHost, .cursorServerPort] {
       defaults.removeObject(forKey: key.rawValue)
     }
   }

@@ -11,6 +11,8 @@ struct SettingsView: View {
   @State private var openClawGatewayToken: String = ""
   @State private var geminiSystemPrompt: String = ""
   @State private var webrtcSignalingURL: String = ""
+  @State private var cursorServerHost: String = ""
+  @State private var cursorServerPort: String = ""
   @State private var showResetConfirmation = false
 
   var body: some View {
@@ -89,6 +91,28 @@ struct SettingsView: View {
           }
         }
 
+        Section(header: Text("Gaze Control"), footer: Text("Connect to the cursor control server on your Mac for gaze-based window control. Run cursor_server.py on your Mac.")) {
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Host")
+              .font(.caption)
+              .foregroundColor(.secondary)
+            TextField("http://your-mac.local", text: $cursorServerHost)
+              .autocapitalization(.none)
+              .disableAutocorrection(true)
+              .keyboardType(.URL)
+              .font(.system(.body, design: .monospaced))
+          }
+
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Port")
+              .font(.caption)
+              .foregroundColor(.secondary)
+            TextField("8765", text: $cursorServerPort)
+              .keyboardType(.numberPad)
+              .font(.system(.body, design: .monospaced))
+          }
+        }
+
         Section {
           Button("Reset to Defaults") {
             showResetConfirmation = true
@@ -135,6 +159,8 @@ struct SettingsView: View {
     openClawHookToken = settings.openClawHookToken
     openClawGatewayToken = settings.openClawGatewayToken
     webrtcSignalingURL = settings.webrtcSignalingURL
+    cursorServerHost = settings.cursorServerHost
+    cursorServerPort = String(settings.cursorServerPort)
   }
 
   private func save() {
@@ -147,5 +173,9 @@ struct SettingsView: View {
     settings.openClawHookToken = openClawHookToken.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.openClawGatewayToken = openClawGatewayToken.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.webrtcSignalingURL = webrtcSignalingURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    settings.cursorServerHost = cursorServerHost.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let port = Int(cursorServerPort.trimmingCharacters(in: .whitespacesAndNewlines)) {
+      settings.cursorServerPort = port
+    }
   }
 }

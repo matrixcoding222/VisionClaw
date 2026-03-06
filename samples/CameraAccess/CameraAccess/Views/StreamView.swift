@@ -22,6 +22,7 @@ struct StreamView: View {
   @ObservedObject var wearablesVM: WearablesViewModel
   @ObservedObject var geminiVM: GeminiSessionViewModel
   @ObservedObject var webrtcVM: WebRTCSessionViewModel
+  @ObservedObject var gazeVM: GazeControlViewModel
 
   var body: some View {
     ZStack {
@@ -94,10 +95,15 @@ struct StreamView: View {
         .padding(.all, 24)
       }
 
+      // Gaze Control overlay (top)
+      if gazeVM.isActive {
+        GazeOverlayView(gazeVM: gazeVM)
+      }
+
       // Bottom controls layer
       VStack {
         Spacer()
-        ControlsView(viewModel: viewModel, geminiVM: geminiVM, webrtcVM: webrtcVM)
+        ControlsView(viewModel: viewModel, geminiVM: geminiVM, webrtcVM: webrtcVM, gazeVM: gazeVM)
       }
       .padding(.all, 24)
     }
@@ -111,6 +117,9 @@ struct StreamView: View {
         }
         if webrtcVM.isActive {
           webrtcVM.stopSession()
+        }
+        if gazeVM.isActive {
+          gazeVM.stopSession()
         }
       }
     }
@@ -143,6 +152,15 @@ struct StreamView: View {
     } message: {
       Text(webrtcVM.errorMessage ?? "")
     }
+    // Gaze Control error alert
+    .alert("Gaze Control", isPresented: Binding(
+      get: { gazeVM.errorMessage != nil },
+      set: { if !$0 { gazeVM.errorMessage = nil } }
+    )) {
+      Button("OK") { gazeVM.errorMessage = nil }
+    } message: {
+      Text(gazeVM.errorMessage ?? "")
+    }
   }
 }
 
@@ -151,60 +169,80 @@ struct ControlsView: View {
   @ObservedObject var viewModel: StreamSessionViewModel
   @ObservedObject var geminiVM: GeminiSessionViewModel
   @ObservedObject var webrtcVM: WebRTCSessionViewModel
+  @ObservedObject var gazeVM: GazeControlViewModel
 
   var body: some View {
-    // Controls row
-    HStack(spacing: 8) {
-      CustomButton(
-        title: "Stop streaming",
-        style: .destructive,
-        isDisabled: false
-      ) {
-        Task {
-          await viewModel.stopSession()
-        }
-      }
+    VStack(spacing: 8) {
+      // Gaze action buttons (click/drag) — shown when gaze is active and calibrated
+      GazeControlButtons(gazeVM: gazeVM)
 
-      // Photo button (glasses mode only -- DAT SDK capture)
-      if viewModel.streamingMode == .glasses {
-        CircleButton(icon: "camera.fill", text: nil) {
-          viewModel.capturePhoto()
+      // Controls row
+      HStack(spacing: 8) {
+        CustomButton(
+          title: "Stop streaming",
+          style: .destructive,
+          isDisabled: false
+        ) {
+          Task {
+            await viewModel.stopSession()
+          }
         }
-      }
 
-      // Gemini AI button (disabled when WebRTC is active — audio conflict)
-      CircleButton(
-        icon: geminiVM.isGeminiActive ? "waveform.circle.fill" : "waveform.circle",
-        text: "AI"
-      ) {
-        Task {
-          if geminiVM.isGeminiActive {
-            geminiVM.stopSession()
-          } else {
-            await geminiVM.startSession()
+        // Photo button (glasses mode only -- DAT SDK capture)
+        if viewModel.streamingMode == .glasses {
+          CircleButton(icon: "camera.fill", text: nil) {
+            viewModel.capturePhoto()
+          }
+        }
+
+        // Gemini AI button (disabled when WebRTC is active — audio conflict)
+        CircleButton(
+          icon: geminiVM.isGeminiActive ? "waveform.circle.fill" : "waveform.circle",
+          text: "AI"
+        ) {
+          Task {
+            if geminiVM.isGeminiActive {
+              geminiVM.stopSession()
+            } else {
+              await geminiVM.startSession()
+            }
+          }
+        }
+        .opacity(webrtcVM.isActive ? 0.4 : 1.0)
+        .disabled(webrtcVM.isActive)
+
+        // WebRTC Live Stream button (disabled when Gemini is active — audio conflict)
+        CircleButton(
+          icon: webrtcVM.isActive
+            ? "antenna.radiowaves.left.and.right.circle.fill"
+            : "antenna.radiowaves.left.and.right.circle",
+          text: "Live"
+        ) {
+          Task {
+            if webrtcVM.isActive {
+              webrtcVM.stopSession()
+            } else {
+              await webrtcVM.startSession()
+            }
+          }
+        }
+        .opacity(geminiVM.isGeminiActive ? 0.4 : 1.0)
+        .disabled(geminiVM.isGeminiActive)
+
+        // Gaze Control button
+        CircleButton(
+          icon: gazeVM.isActive ? "eye.fill" : "eye",
+          text: "Gaze"
+        ) {
+          Task {
+            if gazeVM.isActive {
+              gazeVM.stopSession()
+            } else {
+              await gazeVM.startSession()
+            }
           }
         }
       }
-      .opacity(webrtcVM.isActive ? 0.4 : 1.0)
-      .disabled(webrtcVM.isActive)
-
-      // WebRTC Live Stream button (disabled when Gemini is active — audio conflict)
-      CircleButton(
-        icon: webrtcVM.isActive
-          ? "antenna.radiowaves.left.and.right.circle.fill"
-          : "antenna.radiowaves.left.and.right.circle",
-        text: "Live"
-      ) {
-        Task {
-          if webrtcVM.isActive {
-            webrtcVM.stopSession()
-          } else {
-            await webrtcVM.startSession()
-          }
-        }
-      }
-      .opacity(geminiVM.isGeminiActive ? 0.4 : 1.0)
-      .disabled(geminiVM.isGeminiActive)
     }
   }
 }
