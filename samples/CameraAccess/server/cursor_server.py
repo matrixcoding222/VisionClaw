@@ -637,10 +637,11 @@ class GazeTracker:
         if self._prev_gray is not None and self._kalman.initialized:
             flow_dx, flow_dy = self._compute_optical_flow(self._prev_gray, gray)
             if flow_dx != 0 or flow_dy != 0:
-                # Apply flow directly to Kalman state
+                # Apply flow to Kalman state, dampened to reduce drift.
+                # 0.6 keeps responsiveness while filtering accumulated noise.
                 self._kalman.apply_flow(
-                    -flow_dx * self._scale_factor,
-                    -flow_dy * self._scale_factor,
+                    -flow_dx * self._scale_factor * 0.6,
+                    -flow_dy * self._scale_factor * 0.6,
                 )
 
         # -- Anchor/screen matching: periodic absolute correction --
@@ -877,10 +878,9 @@ class GazeTracker:
         dx = float(np.median(displacements[:, 0]))
         dy = float(np.median(displacements[:, 1]))
 
-        # Dead zone: ignore sub-pixel noise (camera sensor + JPEG artifacts)
-        # Low threshold (0.5px) to preserve subtle head movements
+        # Dead zone: filter camera sensor + JPEG noise but allow real movements
         mag = math.sqrt(dx * dx + dy * dy)
-        if mag < 0.5:
+        if mag < 1.0:
             return 0.0, 0.0
 
         return dx, dy
