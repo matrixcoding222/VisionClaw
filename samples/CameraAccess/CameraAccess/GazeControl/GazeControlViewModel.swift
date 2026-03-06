@@ -18,6 +18,7 @@ class GazeControlViewModel: ObservableObject {
   @Published var errorMessage: String?
   @Published var matchCount: Int = 0
   @Published var confidence: Double = 0.0
+  @Published var handState: String = "OPEN"
   @Published var isCalibrated: Bool = false
   @Published var calibrationPointIndex: Int = 0
   @Published var calibrationTotalPoints: Int = 9
@@ -120,6 +121,8 @@ class GazeControlViewModel: ObservableObject {
           self.mode = self.isDragging ? .dragging : .noMatch
           return
         }
+
+        self.handState = result.handState
 
         if let point = result.point {
           // Only update match stats on anchor frames (matchCount > 0)

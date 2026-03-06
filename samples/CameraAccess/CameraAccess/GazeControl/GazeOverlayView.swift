@@ -11,6 +11,10 @@ struct GazeStatusBar: View {
       if gazeVM.mode == .dragging {
         StatusPill(color: .orange, text: "Dragging")
       }
+
+      if gazeVM.handState == "HELD" {
+        StatusPill(color: .orange, text: "Pinch")
+      }
     }
   }
 

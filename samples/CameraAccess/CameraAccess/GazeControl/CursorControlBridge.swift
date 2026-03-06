@@ -197,6 +197,7 @@ class CursorControlBridge: ObservableObject {
     let point: CGPoint?     // screen coordinate (nil when no_match)
     let matchCount: Int
     let confidence: Double
+    let handState: String   // "OPEN" or "HELD"
   }
 
   /// POST a camera frame JPEG to /locate and get back screen coordinates.
@@ -227,7 +228,8 @@ class CursorControlBridge: ObservableObject {
         status: status,
         point: point,
         matchCount: json["matches"] as? Int ?? 0,
-        confidence: json["confidence"] as? Double ?? 0.0
+        confidence: json["confidence"] as? Double ?? 0.0,
+        handState: json["hand"] as? String ?? "OPEN"
       )
     } catch {
       return nil

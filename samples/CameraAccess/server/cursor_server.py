@@ -387,25 +387,23 @@ def decode_camera_frame(jpeg_bytes):
 class PinchState(Enum):
     OPEN = "OPEN"
     HELD = "HELD"
-    DRAGGING = "DRAGGING"
 
 
 class PinchDetector:
-    """Detect thumb-index pinch gesture from MediaPipe hand landmarks."""
+    """Detect thumb-index pinch gesture from MediaPipe hand landmarks.
+
+    Pinch = mouse_down (immediate). Release = mouse_up.
+    Short pinch naturally becomes a click. Long pinch = press-and-hold.
+    """
 
     PINCH_CLOSE = 0.045   # Normalized distance to trigger pinch
     PINCH_OPEN = 0.07     # Distance to release (hysteresis)
     DEBOUNCE_FRAMES = 2   # Consecutive frames before confirming
-    DRAG_HOLD_MS = 300    # Hold time before drag mode
-    COOLDOWN_MS = 200     # Min time between clicks
 
     def __init__(self):
         self.state = PinchState.OPEN
-        self._close_count = 0       # Consecutive frames below threshold
-        self._pinch_start = 0.0     # Time when pinch confirmed
-        self._last_click = 0.0      # Last click time (cooldown)
-        self._is_dragging = False
-        self.distance = 1.0         # Last measured distance
+        self._close_count = 0
+        self.distance = 1.0
         self.hand_detected = False
         self.last_action = None
         self.last_action_time = 0.0
@@ -413,10 +411,8 @@ class PinchDetector:
     def update(self, thumb_tip, index_tip):
         """Update state with new landmark positions.
 
-        thumb_tip/index_tip: (x, y) normalized 0-1 coordinates.
-        Returns: ("click", ) | ("drag_start", ) | ("drag_end", ) | None
+        Returns: ("mouse_down",) | ("mouse_up",) | None
         """
-        now = time.time()
         dx = thumb_tip[0] - index_tip[0]
         dy = thumb_tip[1] - index_tip[1]
         self.distance = math.sqrt(dx * dx + dy * dy)
@@ -426,66 +422,34 @@ class PinchDetector:
                 self._close_count += 1
                 if self._close_count >= self.DEBOUNCE_FRAMES:
                     self.state = PinchState.HELD
-                    self._pinch_start = now
-                    self._is_dragging = False
-                    print(f"[Hand] Pinch detected (dist={self.distance:.3f})", flush=True)
+                    self.last_action = "mouse_down"
+                    self.last_action_time = time.time()
+                    print(f"[Hand] Pinch -> mouse_down (dist={self.distance:.3f})", flush=True)
+                    return ("mouse_down",)
             else:
                 self._close_count = 0
-            return None
 
         elif self.state == PinchState.HELD:
             if self.distance > self.PINCH_OPEN:
-                # Released - was it a click or end of drag?
                 self.state = PinchState.OPEN
                 self._close_count = 0
-                if self._is_dragging:
-                    self._is_dragging = False
-                    self.last_action = "drag_end"
-                    self.last_action_time = now
-                    print("[Hand] Drag end", flush=True)
-                    return ("drag_end",)
-                elif now - self._last_click > self.COOLDOWN_MS / 1000.0:
-                    self._last_click = now
-                    self.last_action = "click"
-                    self.last_action_time = now
-                    print("[Hand] Click", flush=True)
-                    return ("click",)
-                return None
-            # Still held - check if should transition to drag
-            hold_ms = (now - self._pinch_start) * 1000
-            if hold_ms > self.DRAG_HOLD_MS and not self._is_dragging:
-                self._is_dragging = True
-                self.state = PinchState.DRAGGING
-                self.last_action = "drag_start"
-                self.last_action_time = now
-                print(f"[Hand] Drag start (held {hold_ms:.0f}ms)", flush=True)
-                return ("drag_start",)
-            return None
-
-        elif self.state == PinchState.DRAGGING:
-            if self.distance > self.PINCH_OPEN:
-                self.state = PinchState.OPEN
-                self._close_count = 0
-                self._is_dragging = False
-                self.last_action = "drag_end"
-                self.last_action_time = now
-                print("[Hand] Drag end", flush=True)
-                return ("drag_end",)
-            return None
+                self.last_action = "mouse_up"
+                self.last_action_time = time.time()
+                print("[Hand] Release -> mouse_up", flush=True)
+                return ("mouse_up",)
 
         return None
 
     def on_hand_lost(self):
-        """Call when no hand is detected - auto-release any active drag."""
+        """Call when no hand is detected - auto-release if held."""
         self.hand_detected = False
-        if self._is_dragging or self.state == PinchState.DRAGGING:
+        if self.state == PinchState.HELD:
             self.state = PinchState.OPEN
             self._close_count = 0
-            self._is_dragging = False
-            self.last_action = "drag_end"
+            self.last_action = "mouse_up"
             self.last_action_time = time.time()
-            print("[Hand] Hand lost - auto drag end", flush=True)
-            return ("drag_end",)
+            print("[Hand] Hand lost -> auto mouse_up", flush=True)
+            return ("mouse_up",)
         self.state = PinchState.OPEN
         self._close_count = 0
         return None
@@ -1276,11 +1240,9 @@ class GazeTracker:
             return
         x, y = self._kalman.position()
         action_type = action[0]
-        if action_type == "click":
-            click_mouse(x, y)
-        elif action_type == "drag_start":
+        if action_type == "mouse_down":
             mouse_down(x, y)
-        elif action_type == "drag_end":
+        elif action_type == "mouse_up":
             mouse_up(x, y)
 
     def _match_screen_content(self, cam_feats, cam_w, cam_h, min_matches=7):
