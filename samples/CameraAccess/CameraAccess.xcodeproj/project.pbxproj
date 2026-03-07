@@ -51,6 +51,9 @@
 		E6DA451E2E79A63100E3F688 /* CardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6DA45172E79A63100E3F688 /* CardView.swift */; };
 		E6DA451F2E79A63100E3F688 /* MockDeviceKitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6DA451A2E79A63100E3F688 /* MockDeviceKitView.swift */; };
 		E6FD3BCE2EB4D53A00E7FE5D /* NonStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6FD3BCD2EB4D53A00E7FE5D /* NonStreamView.swift */; };
+		B1D2E3F42F0B000200000001 /* DeepgramService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1D2E3F42F0B000100000001 /* DeepgramService.swift */; };
+		B1D2E3F42F0B000200000002 /* TranscriptionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1D2E3F42F0B000100000002 /* TranscriptionViewModel.swift */; };
+		B1D2E3F42F0B000200000003 /* TranscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1D2E3F42F0B000100000003 /* TranscriptionView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -122,6 +125,9 @@
 		E6DA45182E79A63100E3F688 /* MockDeviceCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockDeviceCardView.swift; sourceTree = "<group>"; };
 		E6DA451A2E79A63100E3F688 /* MockDeviceKitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockDeviceKitView.swift; sourceTree = "<group>"; };
 		E6FD3BCD2EB4D53A00E7FE5D /* NonStreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NonStreamView.swift; sourceTree = "<group>"; };
+		B1D2E3F42F0B000100000001 /* DeepgramService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepgramService.swift; sourceTree = "<group>"; };
+		B1D2E3F42F0B000100000002 /* TranscriptionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionViewModel.swift; sourceTree = "<group>"; };
+		B1D2E3F42F0B000100000003 /* TranscriptionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -216,6 +222,7 @@
 				8FD96B792E6F0A9800F56AB1 /* CameraAccessApp.swift */,
 				8FD96B7B2E6F0A9800F56AB1 /* Info.plist */,
 				9D85EB992F35EC46006C44D1 /* OpenClaw */,
+				B1D2E3F42F0B000300000001 /* Transcription */,
 			);
 			path = CameraAccess;
 			sourceTree = "<group>";
@@ -285,6 +292,16 @@
 				E66D30232E7DA71900470B48 /* MockDeviceKitButton.swift */,
 			);
 			path = MockDeviceKit;
+			sourceTree = "<group>";
+		};
+		B1D2E3F42F0B000300000001 /* Transcription */ = {
+			isa = PBXGroup;
+			children = (
+				B1D2E3F42F0B000100000001 /* DeepgramService.swift */,
+				B1D2E3F42F0B000100000002 /* TranscriptionViewModel.swift */,
+				B1D2E3F42F0B000100000003 /* TranscriptionView.swift */,
+			);
+			path = Transcription;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -432,6 +449,9 @@
 				E6FD3BCE2EB4D53A00E7FE5D /* NonStreamView.swift in Sources */,
 				A1B2C3D42F0A000200000001 /* GeminiConfig.swift in Sources */,
 				A1B2C3D42F0A000200000002 /* GeminiLiveService.swift in Sources */,
+				B1D2E3F42F0B000200000001 /* DeepgramService.swift in Sources */,
+				B1D2E3F42F0B000200000002 /* TranscriptionViewModel.swift in Sources */,
+				B1D2E3F42F0B000200000003 /* TranscriptionView.swift in Sources */,
 				A1B2C3D42F0A000200000003 /* AudioManager.swift in Sources */,
 				A1B2C3D42F0A000200000004 /* GeminiSessionViewModel.swift in Sources */,
 				9DD894B22F4047630090B9B9 /* SettingsManager.swift in Sources */,

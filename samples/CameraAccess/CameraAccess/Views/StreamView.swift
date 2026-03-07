@@ -22,6 +22,7 @@ struct StreamView: View {
   @ObservedObject var wearablesVM: WearablesViewModel
   @ObservedObject var geminiVM: GeminiSessionViewModel
   @ObservedObject var webrtcVM: WebRTCSessionViewModel
+  @ObservedObject var transcriptionVM: TranscriptionViewModel
 
   var body: some View {
     ZStack {
@@ -94,10 +95,15 @@ struct StreamView: View {
         .padding(.all, 24)
       }
 
+      // Transcription overlay
+      if transcriptionVM.isActive {
+        TranscriptionOverlayView(viewModel: transcriptionVM)
+      }
+
       // Bottom controls layer
       VStack {
         Spacer()
-        ControlsView(viewModel: viewModel, geminiVM: geminiVM, webrtcVM: webrtcVM)
+        ControlsView(viewModel: viewModel, geminiVM: geminiVM, webrtcVM: webrtcVM, transcriptionVM: transcriptionVM)
       }
       .padding(.all, 24)
     }
@@ -111,6 +117,9 @@ struct StreamView: View {
         }
         if webrtcVM.isActive {
           webrtcVM.stopSession()
+        }
+        if transcriptionVM.isActive {
+          transcriptionVM.stopSession()
         }
       }
     }
@@ -143,6 +152,15 @@ struct StreamView: View {
     } message: {
       Text(webrtcVM.errorMessage ?? "")
     }
+    // Transcription error alert
+    .alert("Transcription", isPresented: Binding(
+      get: { transcriptionVM.errorMessage != nil },
+      set: { if !$0 { transcriptionVM.errorMessage = nil } }
+    )) {
+      Button("OK") { transcriptionVM.errorMessage = nil }
+    } message: {
+      Text(transcriptionVM.errorMessage ?? "")
+    }
   }
 }
 
@@ -151,6 +169,7 @@ struct ControlsView: View {
   @ObservedObject var viewModel: StreamSessionViewModel
   @ObservedObject var geminiVM: GeminiSessionViewModel
   @ObservedObject var webrtcVM: WebRTCSessionViewModel
+  @ObservedObject var transcriptionVM: TranscriptionViewModel
 
   var body: some View {
     // Controls row
@@ -185,8 +204,24 @@ struct ControlsView: View {
           }
         }
       }
-      .opacity(webrtcVM.isActive ? 0.4 : 1.0)
-      .disabled(webrtcVM.isActive)
+      .opacity(webrtcVM.isActive || transcriptionVM.isActive ? 0.4 : 1.0)
+      .disabled(webrtcVM.isActive || transcriptionVM.isActive)
+
+      // Transcription button (disabled when Gemini or WebRTC is active -- audio conflict)
+      CircleButton(
+        icon: transcriptionVM.isActive ? "text.bubble.fill" : "text.bubble",
+        text: "Scribe"
+      ) {
+        Task {
+          if transcriptionVM.isActive {
+            transcriptionVM.stopSession()
+          } else {
+            await transcriptionVM.startSession()
+          }
+        }
+      }
+      .opacity(geminiVM.isGeminiActive || webrtcVM.isActive ? 0.4 : 1.0)
+      .disabled(geminiVM.isGeminiActive || webrtcVM.isActive)
 
       // WebRTC Live Stream button (disabled when Gemini is active — audio conflict)
       CircleButton(
@@ -203,8 +238,8 @@ struct ControlsView: View {
           }
         }
       }
-      .opacity(geminiVM.isGeminiActive ? 0.4 : 1.0)
-      .disabled(geminiVM.isGeminiActive)
+      .opacity(geminiVM.isGeminiActive || transcriptionVM.isActive ? 0.4 : 1.0)
+      .disabled(geminiVM.isGeminiActive || transcriptionVM.isActive)
     }
   }
 }

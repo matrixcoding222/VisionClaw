@@ -11,6 +11,7 @@ struct SettingsView: View {
   @State private var openClawGatewayToken: String = ""
   @State private var geminiSystemPrompt: String = ""
   @State private var webrtcSignalingURL: String = ""
+  @State private var deepgramAPIKey: String = ""
   @State private var showResetConfirmation = false
 
   var body: some View {
@@ -76,6 +77,18 @@ struct SettingsView: View {
           }
         }
 
+        Section(header: Text("Deepgram"), footer: Text("API key for real-time transcription. Get one at deepgram.com")) {
+          VStack(alignment: .leading, spacing: 4) {
+            Text("API Key")
+              .font(.caption)
+              .foregroundColor(.secondary)
+            TextField("Enter Deepgram API key", text: $deepgramAPIKey)
+              .autocapitalization(.none)
+              .disableAutocorrection(true)
+              .font(.system(.body, design: .monospaced))
+          }
+        }
+
         Section(header: Text("WebRTC")) {
           VStack(alignment: .leading, spacing: 4) {
             Text("Signaling URL")
@@ -135,6 +148,7 @@ struct SettingsView: View {
     openClawHookToken = settings.openClawHookToken
     openClawGatewayToken = settings.openClawGatewayToken
     webrtcSignalingURL = settings.webrtcSignalingURL
+    deepgramAPIKey = settings.deepgramAPIKey
   }
 
   private func save() {
@@ -147,5 +161,6 @@ struct SettingsView: View {
     settings.openClawHookToken = openClawHookToken.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.openClawGatewayToken = openClawGatewayToken.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.webrtcSignalingURL = webrtcSignalingURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    settings.deepgramAPIKey = deepgramAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 }

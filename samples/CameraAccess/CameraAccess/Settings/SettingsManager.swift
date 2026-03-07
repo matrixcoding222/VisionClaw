@@ -13,6 +13,7 @@ final class SettingsManager {
     case openClawGatewayToken
     case geminiSystemPrompt
     case webrtcSignalingURL
+    case deepgramAPIKey
   }
 
   private init() {}
@@ -54,6 +55,13 @@ final class SettingsManager {
     set { defaults.set(newValue, forKey: Key.openClawGatewayToken.rawValue) }
   }
 
+  // MARK: - Deepgram
+
+  var deepgramAPIKey: String {
+    get { defaults.string(forKey: Key.deepgramAPIKey.rawValue) ?? Secrets.deepgramAPIKey }
+    set { defaults.set(newValue, forKey: Key.deepgramAPIKey.rawValue) }
+  }
+
   // MARK: - WebRTC
 
   var webrtcSignalingURL: String {
@@ -65,7 +73,7 @@ final class SettingsManager {
 
   func resetAll() {
     for key in [Key.geminiAPIKey, .geminiSystemPrompt, .openClawHost, .openClawPort,
-                .openClawHookToken, .openClawGatewayToken, .webrtcSignalingURL] {
+                .openClawHookToken, .openClawGatewayToken, .webrtcSignalingURL, .deepgramAPIKey] {
       defaults.removeObject(forKey: key.rawValue)
     }
   }
