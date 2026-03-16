@@ -87,6 +87,21 @@ class MainActivity : ComponentActivity() {
     }
   }
 
+    override fun onPause() {
+        super.onPause()
+        android.util.Log.d("MainActivity", "BGTEST onPause")
+    }
+
+    override fun onStop() {
+        super.onStop()
+        android.util.Log.d("MainActivity", "BGTEST onStop")
+    }
+
+    override fun onResume() {
+        super.onResume()
+        android.util.Log.d("MainActivity", "BGTEST onResume")
+    }
+
   fun checkPermissions(onPermissionsGranted: () -> Unit) {
     registerForActivityResult(RequestMultiplePermissions()) { permissionsResult ->
           val granted = permissionsResult.entries.all { it.value }

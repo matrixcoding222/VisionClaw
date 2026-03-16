@@ -1,18 +1,27 @@
+// app/src/main/java/com/meta/wearable/dat/externalsampleapps/cameraaccess/openclaw/ToolCallRouter.kt
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 
+import android.graphics.Bitmap
 import android.util.Log
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
 class ToolCallRouter(
     private val bridge: OpenClawBridge,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val latestFrameProvider: () -> Bitmap?,
+    private val originalInstructionProvider: () -> String?
 ) {
     companion object {
         private const val TAG = "ToolCallRouter"
+        private const val JPEG_QUALITY_FOR_UPLOAD = 92
     }
 
     private val inFlightJobs = mutableMapOf<String, Job>()
@@ -27,17 +36,56 @@ class ToolCallRouter(
         Log.d(TAG, "Received: $callName (id: $callId) args: ${call.args}")
 
         val job = scope.launch {
-            val taskDesc = call.args["task"]?.toString() ?: call.args.toString()
-            val result = bridge.delegateTask(task = taskDesc, toolName = callName)
+            // Gemini가 tool-call args로 준 "정리된" task (이미 rewriting 된 텍스트)
+            val rewrittenTask = call.args["task"]?.toString() ?: call.args.toString()
 
-            if (!coroutineContext[Job]!!.isCancelled) {
-                Log.d(TAG, "Result for $callName (id: $callId): $result")
-                val response = buildToolResponse(callId, callName, result)
-                sendResponse(response)
+            // 원본 발화(전사) — 우리가 따로 저장해둔 걸 가져옴
+            val original = originalInstructionProvider()
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+
+            // tool-call 시점에만 스냅샷 업로드 (원본 해상도 유지, JPEG로만 인코딩)
+            val bitmap = latestFrameProvider()
+            Log.d("ToolCallRouter", "toolcall bitmapNull=${latestFrameProvider()==null}")
+            val imageUrl: String? = if (SettingsManager.videoStreamingEnabled && bitmap != null) {
+                try {
+                    val baos = ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY_FOR_UPLOAD, baos)
+                    bridge.uploadToolCallImage(baos.toByteArray())
+                } catch (e: Exception) {
+                    Log.w(TAG, "Image upload failed for tool-call $callId: ${e.message}")
+                    null
+                }
             } else {
-                Log.d(TAG, "Task $callId was cancelled, skipping response")
+                null
             }
 
+            // OpenClaw로 넘기는 최종 "명령 텍스트" 포맷
+            val taskPayload = buildString {
+                if (original != null) {
+                    append("[original_instruction]\n")
+                    append(original)
+                    append("\n\n")
+                }
+                append("[gemini_rewritten_instruction]\n")
+                append(rewrittenTask)
+
+                if (!imageUrl.isNullOrEmpty()) {
+                    append("\n\n[tool_call_image_url]\n")
+                    append(imageUrl)
+                }
+            }
+
+            val result = bridge.delegateTask(task = taskPayload, toolName = callName)
+
+            // 취소된 경우 응답 보내지 않음
+            if (!isActive) {
+                Log.d(TAG, "Task $callId cancelled; skipping response")
+                return@launch
+            }
+
+            val response = buildToolResponse(callId, callName, result)
+            sendResponse(response)
             inFlightJobs.remove(callId)
         }
 
@@ -52,6 +100,7 @@ class ToolCallRouter(
                 inFlightJobs.remove(id)
             }
         }
+        bridge.cancelInFlight("tool cancellation ids=$ids")
         bridge.setToolCallStatus(ToolCallStatus.Cancelled(ids.firstOrNull() ?: "unknown"))
     }
 
@@ -61,6 +110,7 @@ class ToolCallRouter(
             job.cancel()
         }
         inFlightJobs.clear()
+        bridge.cancelInFlight("cancelAll")
     }
 
     private fun buildToolResponse(
@@ -69,13 +119,21 @@ class ToolCallRouter(
         result: ToolResult
     ): JSONObject {
         return JSONObject().apply {
-            put("toolResponse", JSONObject().apply {
-                put("functionResponses", JSONArray().put(JSONObject().apply {
-                    put("id", callId)
-                    put("name", name)
-                    put("response", result.toJSON())
-                }))
-            })
+            put(
+                "toolResponse",
+                JSONObject().apply {
+                    put(
+                        "functionResponses",
+                        JSONArray().put(
+                            JSONObject().apply {
+                                put("id", callId)
+                                put("name", name)
+                                put("response", result.toJSON())
+                            }
+                        )
+                    )
+                }
+            )
         }
     }
 }

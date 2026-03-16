@@ -35,8 +35,10 @@ import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.PhoneCameraManager
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.webrtc.WebRTCSessionViewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingService
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -73,38 +75,115 @@ class StreamViewModel(
   var webrtcViewModel: WebRTCSessionViewModel? = null
   private var phoneCameraManager: PhoneCameraManager? = null
 
+  fun setStreamingMode(mode: StreamingMode) {
+    _uiState.update { it.copy(streamingMode = mode) }
+  }
+
+  fun setVideoStreamingEnabled(enabled: Boolean, lifecycleOwner: LifecycleOwner? = null) {
+    SettingsManager.videoStreamingEnabled = enabled
+
+    if (enabled) {
+      when (_uiState.value.streamingMode) {
+        StreamingMode.PHONE -> lifecycleOwner?.let { startPhoneCamera(it) }
+        StreamingMode.GLASSES -> startStream()
+      }
+    } else {
+      stopActiveVideoSource(preserveMode = true)
+      clearVideoCache()
+    }
+  }
+
+  fun clearVideoCache() {
+    geminiViewModel?.clearCachedVideoFrame()
+    _uiState.update { it.copy(videoFrame = null) }
+  }
+
+  private fun stopActiveVideoSource(preserveMode: Boolean) {
+    Log.d(TAG, "BGTEST stopActiveVideoSource called preserveMode=$preserveMode")
+
+    StreamingService.stop(getApplication())
+
+    videoJob?.cancel()
+    videoJob = null
+    stateJob?.cancel()
+    stateJob = null
+    streamSession?.close()
+    streamSession = null
+    phoneCameraManager?.stop()
+    phoneCameraManager = null
+
+    val mode = if (preserveMode) _uiState.value.streamingMode else StreamingMode.GLASSES
+    _uiState.update {
+      it.copy(
+        streamSessionState = StreamSessionState.STOPPED,
+        videoFrame = null,
+        capturedPhoto = null,
+        isShareDialogVisible = false,
+        isCapturing = false,
+        streamingMode = mode,
+      )
+    }
+  }
+
   fun startStream() {
+    if (!SettingsManager.videoStreamingEnabled) {
+      setStreamingMode(StreamingMode.GLASSES)
+      stopActiveVideoSource(preserveMode = true)
+      clearVideoCache()
+      return
+    }
+
     videoJob?.cancel()
     stateJob?.cancel()
 
-    // Start foreground service to keep streaming alive in background / screen locked
     StreamingService.start(getApplication())
 
     val streamSession =
-        Wearables.startStreamSession(
-                getApplication(),
-                deviceSelector,
-                StreamConfiguration(videoQuality = VideoQuality.MEDIUM, 24),
-            )
-            .also { streamSession = it }
-    _uiState.update { it.copy(streamingMode = StreamingMode.GLASSES) }
-    videoJob = viewModelScope.launch { streamSession.videoStream.collect { handleVideoFrame(it) } }
-    stateJob =
-        viewModelScope.launch {
-          streamSession.state.collect { currentState ->
-            val prevState = _uiState.value.streamSessionState
-            _uiState.update { it.copy(streamSessionState = currentState) }
+      Wearables.startStreamSession(
+        getApplication(),
+        deviceSelector,
+        StreamConfiguration(videoQuality = VideoQuality.MEDIUM, 24),
+      ).also { streamSession = it }
 
-            // navigate back when state transitioned to STOPPED
-            if (currentState != prevState && currentState == StreamSessionState.STOPPED) {
-              stopStream()
-              wearablesViewModel.navigateToDeviceSelection()
-            }
+
+    _uiState.update { it.copy(streamingMode = StreamingMode.GLASSES) }
+
+    videoJob =
+      viewModelScope.launch {
+        streamSession.videoStream.collect { frame ->
+//          Log.d(
+//            TAG,
+//            "BGTEST frame received w=${frame.width} h=${frame.height} t=${System.currentTimeMillis()}"
+//          )
+          handleVideoFrame(frame)
+        }
+      }
+
+    stateJob =
+      viewModelScope.launch {
+        Log.d(TAG, "BGTEST stateJob launched")
+        streamSession.state.collect { currentState ->
+          Log.d(TAG, "BGTEST stream state = $currentState")
+          val prevState = _uiState.value.streamSessionState
+          _uiState.update { it.copy(streamSessionState = currentState) }
+
+          if (currentState != prevState && currentState == StreamSessionState.STOPPED) {
+            Log.d(TAG, "BGTEST state became STOPPED -> stopStream()")
+            stopStream()
+            wearablesViewModel.navigateToDeviceSelection()
           }
         }
+      }
   }
 
   fun startPhoneCamera(lifecycleOwner: LifecycleOwner) {
+    if (!SettingsManager.videoStreamingEnabled) {
+      setStreamingMode(StreamingMode.PHONE)
+      stopActiveVideoSource(preserveMode = true)
+      clearVideoCache()
+      return
+    }
+
     val manager = PhoneCameraManager(getApplication())
     phoneCameraManager = manager
 
@@ -127,18 +206,8 @@ class StreamViewModel(
   }
 
   fun stopStream() {
-    // Stop foreground service
-    StreamingService.stop(getApplication())
-
-    videoJob?.cancel()
-    videoJob = null
-    stateJob?.cancel()
-    stateJob = null
-    streamSession?.close()
-    streamSession = null
-    phoneCameraManager?.stop()
-    phoneCameraManager = null
-    _uiState.update { INITIAL_STATE }
+    Log.d(TAG, "BGTEST stopStream called")
+    stopActiveVideoSource(preserveMode = false)
   }
 
   fun capturePhoto() {
@@ -214,6 +283,11 @@ class StreamViewModel(
   }
 
   private fun handleVideoFrame(videoFrame: VideoFrame) {
+//    Log.d(
+//      TAG,
+//      "BGTEST handleVideoFrame entered w=${videoFrame.width} h=${videoFrame.height} t=${System.currentTimeMillis()}"
+//    )
+
     // VideoFrame contains raw I420 video data in a ByteBuffer
     val buffer = videoFrame.buffer
     val dataSize = buffer.remaining()

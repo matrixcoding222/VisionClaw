@@ -42,6 +42,10 @@ class GeminiLiveService {
     private val _isModelSpeaking = MutableStateFlow(false)
     val isModelSpeaking: StateFlow<Boolean> = _isModelSpeaking.asStateFlow()
 
+    // Debug: last disconnect/failure detail
+    private val _lastDisconnectInfo = MutableStateFlow<String?>(null)
+    val lastDisconnectInfo: StateFlow<String?> = _lastDisconnectInfo.asStateFlow()
+
     var onAudioReceived: ((ByteArray) -> Unit)? = null
     var onTurnComplete: (() -> Unit)? = null
     var onInterrupted: (() -> Unit)? = null
@@ -60,15 +64,19 @@ class GeminiLiveService {
     private var connectCallback: ((Boolean) -> Unit)? = null
     private var timeoutTimer: Timer? = null
 
+    // NOTE: user said pingInterval already increased; keep your current value here.
+    // If you want, change 10 -> 30/60.
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .pingInterval(10, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     fun connect(callback: (Boolean) -> Unit) {
         val url = GeminiConfig.websocketURL()
         if (url == null) {
             _connectionState.value = GeminiConnectionState.Error("No API key configured")
+            _lastDisconnectInfo.value = "No API key configured"
             callback(false)
             return
         }
@@ -93,24 +101,40 @@ class GeminiLiveService {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                val msg = t.message ?: "Unknown error"
-                Log.e(TAG, "WebSocket failure: $msg")
-                _connectionState.value = GeminiConnectionState.Error(msg)
+                val detail = buildString {
+                    append("WS failure: ")
+                    append(t::class.java.name)
+                    append(": ")
+                    append(t.message ?: "no-message")
+                    if (response != null) {
+                        append(" | HTTP ")
+                        append(response.code)
+                        append(" ")
+                        append(response.message)
+                    }
+                }
+
+                Log.e(TAG, detail, t)
+                _lastDisconnectInfo.value = detail
+                _connectionState.value = GeminiConnectionState.Error(detail)
                 _isModelSpeaking.value = false
                 resolveConnect(false)
-                onDisconnected?.invoke(msg)
+                onDisconnected?.invoke(detail)
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                Log.d(TAG, "WebSocket closing: $code $reason")
+                val detail = "WS closing: code=$code reason=$reason"
+                Log.w(TAG, detail)
+                _lastDisconnectInfo.value = detail
                 _connectionState.value = GeminiConnectionState.Disconnected
                 _isModelSpeaking.value = false
                 resolveConnect(false)
-                onDisconnected?.invoke("Connection closed (code $code: $reason)")
+                onDisconnected?.invoke(detail)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.d(TAG, "WebSocket closed: $code $reason")
+                _lastDisconnectInfo.value = "WS closed: code=$code reason=$reason"
                 _connectionState.value = GeminiConnectionState.Disconnected
                 _isModelSpeaking.value = false
             }
@@ -122,9 +146,13 @@ class GeminiLiveService {
                 override fun run() {
                     if (_connectionState.value == GeminiConnectionState.Connecting
                         || _connectionState.value == GeminiConnectionState.SettingUp) {
-                        Log.e(TAG, "Connection timed out")
-                        _connectionState.value = GeminiConnectionState.Error("Connection timed out")
+                        val detail = "WS connect/setup timed out (15s)"
+                        Log.e(TAG, detail)
+                        _lastDisconnectInfo.value = detail
+                        _connectionState.value = GeminiConnectionState.Error(detail)
+                        webSocket?.cancel()
                         resolveConnect(false)
+                        onDisconnected?.invoke(detail)
                     }
                 }
             }, 15000)
@@ -136,8 +164,8 @@ class GeminiLiveService {
         timeoutTimer = null
         webSocket?.close(1000, null)
         webSocket = null
-        onToolCall = null
-        onToolCallCancellation = null
+//        onToolCall = null
+//        onToolCallCancellation = null
         _connectionState.value = GeminiConnectionState.Disconnected
         _isModelSpeaking.value = false
         resolveConnect(false)
@@ -155,6 +183,7 @@ class GeminiLiveService {
                     })
                 })
             }
+            Log.d("GeminiWS", "SEND_AUDIO_CHUNK")
             webSocket?.send(json.toString())
         }
     }
@@ -173,12 +202,14 @@ class GeminiLiveService {
                     })
                 })
             }
+            Log.d("GeminiWS", "SEND_VIDEO_FRAME")
             webSocket?.send(json.toString())
         }
     }
 
     fun sendToolResponse(response: JSONObject) {
         sendExecutor.execute {
+            Log.d("GeminiWS", "SEND_TOOL: " + response.toString().take(300))
             webSocket?.send(response.toString())
         }
     }
@@ -249,6 +280,7 @@ class GeminiLiveService {
             })
         }
         // Send directly (not via sendExecutor) to ensure it's the first message
+        Log.d("GeminiWS", "SEND_SETUP")
         webSocket?.send(setup.toString())
     }
 
@@ -266,10 +298,21 @@ class GeminiLiveService {
             // GoAway
             if (json.has("goAway")) {
                 val goAway = json.getJSONObject("goAway")
-                val seconds = goAway.optJSONObject("timeLeft")?.optInt("seconds", 0) ?: 0
+                val detail = goAway.optString("detail", "server requested disconnect")
+                Log.w(TAG, "Gemini goAway: $detail")
+
+                val ws = webSocket
+                webSocket = null
+
+                try {
+                    ws?.close(1000, detail)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error closing websocket on goAway", e)
+                }
+
                 _connectionState.value = GeminiConnectionState.Disconnected
                 _isModelSpeaking.value = false
-                onDisconnected?.invoke("Server closing (time left: ${seconds}s)")
+                onDisconnected?.invoke(detail)
                 return
             }
 

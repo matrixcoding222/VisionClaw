@@ -14,16 +14,23 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -38,6 +45,7 @@ import com.meta.wearable.dat.camera.types.StreamSessionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamViewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingMode
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.webrtc.WebRTCSessionViewModel
@@ -74,14 +82,21 @@ fun StreamScreen(
         streamViewModel.webrtcViewModel = webrtcViewModel
     }
 
+    var videoStreamingEnabled by remember { mutableStateOf(SettingsManager.videoStreamingEnabled) }
+
     // Start stream or phone camera
-    LaunchedEffect(isPhoneMode) {
-        if (isPhoneMode) {
-            geminiViewModel.streamingMode = StreamingMode.PHONE
-            streamViewModel.startPhoneCamera(lifecycleOwner)
+    LaunchedEffect(isPhoneMode, videoStreamingEnabled) {
+        geminiViewModel.streamingMode = if (isPhoneMode) StreamingMode.PHONE else StreamingMode.GLASSES
+        streamViewModel.setStreamingMode(if (isPhoneMode) StreamingMode.PHONE else StreamingMode.GLASSES)
+
+        if (videoStreamingEnabled) {
+            if (isPhoneMode) {
+                streamViewModel.startPhoneCamera(lifecycleOwner)
+            } else {
+                streamViewModel.startStream()
+            }
         } else {
-            geminiViewModel.streamingMode = StreamingMode.GLASSES
-            streamViewModel.startStream()
+            streamViewModel.setVideoStreamingEnabled(false, lifecycleOwner)
         }
     }
 
@@ -122,6 +137,13 @@ fun StreamScreen(
             )
         }
 
+        if (streamUiState.videoFrame == null && !videoStreamingEnabled) {
+            Text(
+                text = "Audio-only mode\nAll video streaming is off.",
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
+
         if (streamUiState.streamSessionState == StreamSessionState.STARTING) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.Center),
@@ -132,6 +154,25 @@ fun StreamScreen(
         Box(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
             // Top overlays (below status bar)
             Column(modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(top = 8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    FilterChip(
+                        selected = !videoStreamingEnabled,
+                        onClick = {
+                            val newEnabled = !videoStreamingEnabled
+                            videoStreamingEnabled = newEnabled
+                            streamViewModel.setVideoStreamingEnabled(newEnabled, lifecycleOwner)
+                        },
+                        label = {
+                            Text(
+                                if (videoStreamingEnabled) "Switch to audio-only" else "Enable video"
+                            )
+                        },
+                        modifier = Modifier.widthIn(min = 160.dp),
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 // Gemini overlay
                 if (geminiUiState.isGeminiActive) {
                     GeminiOverlay(uiState = geminiUiState)
@@ -161,6 +202,8 @@ fun StreamScreen(
                     }
                 },
                 isAIActive = geminiUiState.isGeminiActive,
+                onToggleMic = { geminiViewModel.toggleMic() },
+                isMicEnabled = geminiUiState.isMicEnabled,
                 onToggleLive = {
                     if (webrtcUiState.isActive) {
                         webrtcViewModel.stopSession()

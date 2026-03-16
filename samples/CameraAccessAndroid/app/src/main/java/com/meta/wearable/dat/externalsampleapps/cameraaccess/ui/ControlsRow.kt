@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -26,6 +28,8 @@ fun ControlsRow(
     onCapturePhoto: () -> Unit,
     onToggleAI: () -> Unit,
     isAIActive: Boolean,
+    onToggleMic: () -> Unit,
+    isMicEnabled: Boolean,
     onToggleLive: () -> Unit,
     isLiveActive: Boolean,
     modifier: Modifier = Modifier,
@@ -62,6 +66,27 @@ fun ControlsRow(
             Icon(
                 imageVector = Icons.Default.AutoAwesome,
                 contentDescription = if (isAIActive) "Stop AI" else "Start AI",
+                tint = Color.White,
+            )
+        }
+
+        // Mic toggle button (only meaningful when AI is active)
+        Button(
+            onClick = onToggleMic,
+            enabled = isAIActive,
+            modifier = Modifier.aspectRatio(1f),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (!isAIActive) AppColor.DeepBlue
+                else if (isMicEnabled) AppColor.DeepBlue
+                else AppColor.Red,
+                disabledContainerColor = AppColor.DeepBlue,
+            ),
+            shape = CircleShape,
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            Icon(
+                imageVector = if (isMicEnabled) Icons.Default.Mic else Icons.Default.MicOff,
+                contentDescription = if (isMicEnabled) "Mute Mic" else "Unmute Mic",
                 tint = Color.White,
             )
         }
