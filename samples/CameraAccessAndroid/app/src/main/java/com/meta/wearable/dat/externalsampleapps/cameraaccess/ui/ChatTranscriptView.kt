@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -53,13 +54,15 @@ fun ChatTranscriptView(
             )
         }
     } else {
-        LazyColumn(
-            state = listState,
-            modifier = modifier.fillMaxSize().padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            items(messages, key = { it.id }) { message ->
-                MessageBubble(message = message)
+        SelectionContainer {
+            LazyColumn(
+                state = listState,
+                modifier = modifier.fillMaxSize().padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                items(messages, key = { it.id }) { message ->
+                    MessageBubble(message = message)
+                }
             }
         }
     }
