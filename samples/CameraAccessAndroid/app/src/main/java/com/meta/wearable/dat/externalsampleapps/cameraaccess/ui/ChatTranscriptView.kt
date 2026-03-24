@@ -48,7 +48,7 @@ fun ChatTranscriptView(
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
                 text = "Start talking to see the conversation here",
-                color = Color.White.copy(alpha = 0.5f),
+                color = Color.Black.copy(alpha = 0.4f),
                 fontSize = 14.sp,
             )
         }
@@ -99,7 +99,7 @@ private fun AssistantBubble(message: ChatMessage, modifier: Modifier = Modifier)
     ) {
         Text(
             text = message.text,
-            color = Color.White.copy(alpha = 0.9f),
+            color = Color.Black.copy(alpha = 0.85f),
             fontSize = 15.sp,
             modifier = Modifier.padding(horizontal = 0.dp),
         )
@@ -124,7 +124,7 @@ private fun ToolCallBubble(name: String, message: ChatMessage, modifier: Modifie
             if (message.status is ChatMessageStatus.Streaming) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(12.dp),
-                    color = Color.White,
+                    color = Color.Black.copy(alpha = 0.6f),
                     strokeWidth = 1.5.dp,
                 )
             } else {
@@ -137,7 +137,7 @@ private fun ToolCallBubble(name: String, message: ChatMessage, modifier: Modifie
             }
             Text(
                 text = name,
-                color = Color.White.copy(alpha = 0.8f),
+                color = Color.Black.copy(alpha = 0.6f),
                 fontSize = 12.sp,
             )
         }
