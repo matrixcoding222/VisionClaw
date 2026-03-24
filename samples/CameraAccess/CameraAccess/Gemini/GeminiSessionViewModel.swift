@@ -9,6 +9,7 @@ class GeminiSessionViewModel: ObservableObject {
   @Published var errorMessage: String?
   @Published var userTranscript: String = ""
   @Published var aiTranscript: String = ""
+  @Published var messages: [ChatMessage] = []
   @Published var toolCallStatus: ToolCallStatus = .idle
   @Published var openClawConnectionState: OpenClawConnectionState = .notConfigured
   private let geminiService = GeminiLiveService()
@@ -18,6 +19,12 @@ class GeminiSessionViewModel: ObservableObject {
   private let eventClient = OpenClawEventClient()
   private var lastVideoFrameTime: Date = .distantPast
   private var stateObservation: Task<Void, Never>?
+
+  // Chat message tracking
+  private var activeUserBubbleId: String?
+  private var activeAIBubbleId: String?
+  private var lastUserText: String = ""
+  private var lastAIText: String = ""
 
   var streamingMode: StreamingMode = .glasses
 
@@ -54,7 +61,7 @@ class GeminiSessionViewModel: ObservableObject {
     geminiService.onTurnComplete = { [weak self] in
       guard let self else { return }
       Task { @MainActor in
-        // Clear user transcript when AI finishes responding
+        self.finalizeCurrentBubbles()
         self.userTranscript = ""
       }
     }
@@ -64,6 +71,7 @@ class GeminiSessionViewModel: ObservableObject {
       Task { @MainActor in
         self.userTranscript += text
         self.aiTranscript = ""
+        self.updateUserBubble(self.userTranscript)
       }
     }
 
@@ -71,6 +79,7 @@ class GeminiSessionViewModel: ObservableObject {
       guard let self else { return }
       Task { @MainActor in
         self.aiTranscript += text
+        self.updateAIBubble(self.aiTranscript)
       }
     }
 
@@ -95,8 +104,18 @@ class GeminiSessionViewModel: ObservableObject {
       guard let self else { return }
       Task { @MainActor in
         for call in toolCall.functionCalls {
+          self.finalizeCurrentBubbles()
+          let msg = ChatMessage(role: .toolCall(call.name), text: "Executing...", status: .streaming)
+          self.messages.append(msg)
+          let toolMsgId = msg.id
+
           self.toolCallRouter?.handleToolCall(call) { [weak self] response in
-            self?.geminiService.sendToolResponse(response)
+            guard let self else { return }
+            if let idx = self.messages.firstIndex(where: { $0.id == toolMsgId }) {
+              self.messages[idx].text = "Done"
+              self.messages[idx].status = .complete
+            }
+            self.geminiService.sendToolResponse(response)
           }
         }
       }
@@ -201,4 +220,51 @@ class GeminiSessionViewModel: ObservableObject {
     geminiService.sendVideoFrame(image: image)
   }
 
+  // MARK: - Chat message helpers
+
+  private func updateUserBubble(_ text: String) {
+    guard !text.isEmpty else { return }
+    if let id = activeUserBubbleId, let idx = messages.firstIndex(where: { $0.id == id }) {
+      messages[idx].text = text
+    } else {
+      // Finalize previous AI bubble before starting new user turn
+      if let aiId = activeAIBubbleId, let idx = messages.firstIndex(where: { $0.id == aiId }) {
+        messages[idx].status = .complete
+        activeAIBubbleId = nil
+      }
+      let msg = ChatMessage(role: .user, text: text, status: .streaming)
+      messages.append(msg)
+      activeUserBubbleId = msg.id
+    }
+    lastUserText = text
+  }
+
+  private func updateAIBubble(_ text: String) {
+    guard !text.isEmpty else { return }
+    // Finalize user bubble when AI starts responding
+    if let userId = activeUserBubbleId, let idx = messages.firstIndex(where: { $0.id == userId }) {
+      messages[idx].status = .complete
+    }
+    if let id = activeAIBubbleId, let idx = messages.firstIndex(where: { $0.id == id }) {
+      messages[idx].text = text
+    } else {
+      let msg = ChatMessage(role: .assistant, text: text, status: .streaming)
+      messages.append(msg)
+      activeAIBubbleId = msg.id
+    }
+    lastAIText = text
+  }
+
+  private func finalizeCurrentBubbles() {
+    if let id = activeUserBubbleId, let idx = messages.firstIndex(where: { $0.id == id }) {
+      messages[idx].status = .complete
+    }
+    if let id = activeAIBubbleId, let idx = messages.firstIndex(where: { $0.id == id }) {
+      messages[idx].status = .complete
+    }
+    activeUserBubbleId = nil
+    activeAIBubbleId = nil
+    lastUserText = ""
+    lastAIText = ""
+  }
 }

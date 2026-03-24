@@ -5,6 +5,9 @@ import android.app.Application
 import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.chat.ChatMessage
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.chat.ChatMessageRole
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.chat.ChatMessageStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.net.NetworkType
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.net.NetworkTypeMonitor
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawBridge
@@ -30,6 +33,7 @@ data class GeminiUiState(
     val errorMessage: String? = null,
     val userTranscript: String = "",
     val aiTranscript: String = "",
+    val messages: List<ChatMessage> = emptyList(),
     val toolCallStatus: ToolCallStatus = ToolCallStatus.Idle,
     val openClawConnectionState: OpenClawConnectionState = OpenClawConnectionState.NotConfigured,
     val networkType: NetworkType = NetworkType.NONE,
@@ -65,6 +69,12 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
     private val videoIntervalWifiMs = 1000L
     private val videoIntervalCellularMs = 4000L
     private val videoIntervalOtherMs = 2000L
+
+    // Chat message tracking
+    private var activeUserBubbleId: String? = null
+    private var activeAIBubbleId: String? = null
+    private var lastUserText: String = ""
+    private var lastAIText: String = ""
 
     // execute 시작 시 mic 상태를 저장해뒀다가 끝나면 복원
     private var micStateBeforeExecution: Boolean? = null
@@ -166,11 +176,10 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         geminiService.onTurnComplete = {
+            finalizeCurrentBubbles()
             _uiState.value = _uiState.value.copy(userTranscript = "")
-            // turn이 끝나면 원본 발화도 "이전 턴"으로 굳음. (원하면 여기서 별도 저장/rotate 가능)
         }
 
-        // execute 중에는 입력 전사도 누적하지 않음
         geminiService.onInputTranscription = input@{ text ->
             if (isToolExecuting(_uiState.value.toolCallStatus)) return@input
 
@@ -181,12 +190,13 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
                 userTranscript = newTranscript,
                 aiTranscript = ""
             )
+            updateUserBubble(newTranscript)
         }
 
         geminiService.onOutputTranscription = { text ->
-            _uiState.value = _uiState.value.copy(
-                aiTranscript = _uiState.value.aiTranscript + text
-            )
+            val newAI = _uiState.value.aiTranscript + text
+            _uiState.value = _uiState.value.copy(aiTranscript = newAI)
+            updateAIBubble(newAI)
         }
 
         geminiService.onDisconnected = { reason ->
@@ -211,7 +221,21 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
 
             geminiService.onToolCall = { toolCall ->
                 for (call in toolCall.functionCalls) {
+                    finalizeCurrentBubbles()
+                    val toolMsg = ChatMessage(
+                        role = ChatMessageRole.ToolCall(call.name),
+                        text = "Executing...",
+                        status = ChatMessageStatus.Streaming,
+                    )
+                    val msgs = _uiState.value.messages.toMutableList()
+                    msgs.add(toolMsg)
+                    _uiState.value = _uiState.value.copy(messages = msgs)
+
                     toolCallRouter?.handleToolCall(call) { response ->
+                        val updated = _uiState.value.messages.map {
+                            if (it.id == toolMsg.id) it.copy(text = "Done", status = ChatMessageStatus.Complete) else it
+                        }
+                        _uiState.value = _uiState.value.copy(messages = updated)
                         geminiService.sendToolResponse(response)
                     }
                 }
@@ -417,6 +441,69 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearError() {
         _uiState.value = _uiState.value.copy(errorMessage = null)
+    }
+
+    // Chat message helpers
+
+    private fun updateUserBubble(text: String) {
+        if (text.isEmpty()) return
+        val msgs = _uiState.value.messages.toMutableList()
+        val existingIdx = activeUserBubbleId?.let { id -> msgs.indexOfFirst { it.id == id } }?.takeIf { it >= 0 }
+
+        if (existingIdx != null) {
+            msgs[existingIdx] = msgs[existingIdx].copy(text = text)
+        } else {
+            // Finalize previous AI bubble
+            activeAIBubbleId?.let { aiId ->
+                val aiIdx = msgs.indexOfFirst { it.id == aiId }
+                if (aiIdx >= 0) msgs[aiIdx] = msgs[aiIdx].copy(status = ChatMessageStatus.Complete)
+                activeAIBubbleId = null
+            }
+            val msg = ChatMessage(role = ChatMessageRole.User, text = text, status = ChatMessageStatus.Streaming)
+            msgs.add(msg)
+            activeUserBubbleId = msg.id
+        }
+        lastUserText = text
+        _uiState.value = _uiState.value.copy(messages = msgs)
+    }
+
+    private fun updateAIBubble(text: String) {
+        if (text.isEmpty()) return
+        val msgs = _uiState.value.messages.toMutableList()
+
+        // Finalize user bubble
+        activeUserBubbleId?.let { userId ->
+            val idx = msgs.indexOfFirst { it.id == userId }
+            if (idx >= 0) msgs[idx] = msgs[idx].copy(status = ChatMessageStatus.Complete)
+        }
+
+        val existingIdx = activeAIBubbleId?.let { id -> msgs.indexOfFirst { it.id == id } }?.takeIf { it >= 0 }
+        if (existingIdx != null) {
+            msgs[existingIdx] = msgs[existingIdx].copy(text = text)
+        } else {
+            val msg = ChatMessage(role = ChatMessageRole.Assistant, text = text, status = ChatMessageStatus.Streaming)
+            msgs.add(msg)
+            activeAIBubbleId = msg.id
+        }
+        lastAIText = text
+        _uiState.value = _uiState.value.copy(messages = msgs)
+    }
+
+    private fun finalizeCurrentBubbles() {
+        val msgs = _uiState.value.messages.toMutableList()
+        activeUserBubbleId?.let { id ->
+            val idx = msgs.indexOfFirst { it.id == id }
+            if (idx >= 0) msgs[idx] = msgs[idx].copy(status = ChatMessageStatus.Complete)
+        }
+        activeAIBubbleId?.let { id ->
+            val idx = msgs.indexOfFirst { it.id == id }
+            if (idx >= 0) msgs[idx] = msgs[idx].copy(status = ChatMessageStatus.Complete)
+        }
+        activeUserBubbleId = null
+        activeAIBubbleId = null
+        lastUserText = ""
+        lastAIText = ""
+        _uiState.value = _uiState.value.copy(messages = msgs)
     }
 
     override fun onCleared() {
