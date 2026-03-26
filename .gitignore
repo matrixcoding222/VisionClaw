@@ -7,5 +7,5 @@ samples/CameraAccessAndroid/.gradle/
 samples/CameraAccessAndroid/build/
 samples/CameraAccessAndroid/app/build/
 
-# Server logs (sensitive session data)
+# Server logs (now stored in ~/.openclaw/visionclaw-logs/ for agent access)
 samples/CameraAccess/server/logs/

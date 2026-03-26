@@ -35,9 +35,13 @@ function getTurnCredentials() {
 }
 
 // --- Session Logger ---
-// Stores logs as JSONL files on disk, matching IntentOS's logging pattern.
-const LOGS_DIR = path.join(__dirname, "logs");
+// Stores logs as JSONL files in ~/.openclaw/visionclaw-logs/ so OpenClaw
+// can discover and analyze them via its file tools (read, exec, etc.).
+// This makes logs "agent-extractable" — just ask OpenClaw to read them.
+const os = require("os");
+const LOGS_DIR = path.join(os.homedir(), ".openclaw", "visionclaw-logs");
 if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
+console.log(`[Logger] Writing logs to ${LOGS_DIR}`);
 
 function getLogFilePath() {
   const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
