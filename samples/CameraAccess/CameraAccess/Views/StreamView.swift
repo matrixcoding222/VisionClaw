@@ -23,6 +23,8 @@ struct StreamView: View {
   @ObservedObject var geminiVM: GeminiSessionViewModel
   @ObservedObject var webrtcVM: WebRTCSessionViewModel
   @State private var selectedTab: StreamTab = .camera
+  @State private var showGallery = false
+  @State private var showCaptureToast = false
 
   enum StreamTab: String, CaseIterable {
     case camera = "Camera"
@@ -51,6 +53,14 @@ struct StreamView: View {
           HStack {
             GeminiStatusBar(geminiVM: geminiVM)
             Spacer()
+            Button(action: { showGallery = true }) {
+              Image(systemName: "photo.on.rectangle")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.white)
+                .padding(8)
+                .background(Color.black.opacity(0.5))
+                .clipShape(Circle())
+            }
             Picker("", selection: $selectedTab) {
               ForEach(StreamTab.allCases, id: \.self) { tab in
                 Text(tab.rawValue).tag(tab)
@@ -100,6 +110,34 @@ struct StreamView: View {
         }
       }
     }
+    // Gallery sheet
+    .sheet(isPresented: $showGallery) {
+      NavigationStack {
+        GalleryView()
+      }
+    }
+    // Capture toast
+    .overlay(alignment: .top) {
+      if showCaptureToast {
+        Text("Photo captured")
+          .font(.subheadline.weight(.medium))
+          .foregroundColor(.white)
+          .padding(.horizontal, 16)
+          .padding(.vertical, 8)
+          .background(Color.black.opacity(0.7))
+          .cornerRadius(20)
+          .padding(.top, 80)
+          .transition(.move(edge: .top).combined(with: .opacity))
+      }
+    }
+    .onChange(of: geminiVM.lastCapturedPhoto?.id) { _, newId in
+      guard newId != nil else { return }
+      withAnimation { showCaptureToast = true }
+      Task {
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        withAnimation { showCaptureToast = false }
+      }
+    }
     // Show captured photos from DAT SDK in a preview sheet
     .sheet(isPresented: $viewModel.showPhotoPreview) {
       if let photo = viewModel.capturedPhoto {
@@ -130,7 +168,6 @@ struct StreamView: View {
       Text(webrtcVM.errorMessage ?? "")
     }
   }
-}
 
   @ViewBuilder
   private var cameraContent: some View {
@@ -250,3 +287,4 @@ struct ControlsView: View {
     }
   }
 }
+

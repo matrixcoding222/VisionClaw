@@ -5,6 +5,9 @@ class ToolCallRouter {
   private let bridge: OpenClawBridge
   private var inFlightTasks: [String: Task<Void, Never>] = [:]
 
+  /// Callback for local capture_photo handling. Called with (description, completion).
+  var onCapturePhoto: ((_ description: String?, _ completion: @escaping (ToolResult) -> Void) -> Void)?
+
   init(bridge: OpenClawBridge) {
     self.bridge = bridge
   }
@@ -20,6 +23,18 @@ class ToolCallRouter {
 
     NSLog("[ToolCall] Received: %@ (id: %@) args: %@",
           callName, callId, String(describing: call.args))
+
+    // Local tool: capture_photo — handle on-device, don't send to OpenClaw
+    if callName == "capture_photo" {
+      let description = call.args["description"] as? String
+      onCapturePhoto?(description) { [weak self] result in
+        guard let self else { return }
+        NSLog("[ToolCall] capture_photo result: %@", String(describing: result))
+        let response = self.buildToolResponse(callId: callId, name: callName, result: result)
+        sendResponse(response)
+      }
+      return
+    }
 
     let task = Task { @MainActor in
       let taskDesc = call.args["task"] as? String ?? String(describing: call.args)

@@ -18,6 +18,9 @@ class GeminiSessionViewModel: ObservableObject {
   private let audioManager = AudioManager()
   private let eventClient = OpenClawEventClient()
   private var lastVideoFrameTime: Date = .distantPast
+  private var latestVideoFrame: UIImage?
+  private let photoCaptureStore = PhotoCaptureStore.shared
+  @Published var lastCapturedPhoto: CapturedPhoto?
   private var stateObservation: Task<Void, Never>?
 
   // Chat message tracking
@@ -107,6 +110,21 @@ class GeminiSessionViewModel: ObservableObject {
 
     // Wire tool call handling
     toolCallRouter = ToolCallRouter(bridge: openClawBridge)
+
+    // Local capture_photo handler
+    toolCallRouter?.onCapturePhoto = { [weak self] description, completion in
+      guard let self else { completion(.failure("Session ended")); return }
+      guard let frame = self.latestVideoFrame else {
+        completion(.failure("No camera frame available to capture"))
+        return
+      }
+      if let photo = self.photoCaptureStore.saveFrame(frame, description: description) {
+        self.lastCapturedPhoto = photo
+        completion(.success("Photo captured and saved: \(photo.filename)"))
+      } else {
+        completion(.failure("Failed to save photo"))
+      }
+    }
 
     geminiService.onToolCall = { [weak self] toolCall in
       guard let self else { return }
@@ -225,6 +243,8 @@ class GeminiSessionViewModel: ObservableObject {
   }
 
   func sendVideoFrameIfThrottled(image: UIImage) {
+    // Always keep latest frame for capture_photo
+    latestVideoFrame = image
     guard SettingsManager.shared.videoStreamingEnabled else { return }
     guard isGeminiActive, connectionState == .ready else { return }
     let now = Date()
