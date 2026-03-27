@@ -70,7 +70,10 @@ class OpenClawEventClient {
 
         Log.d(TAG, "Connecting to $url")
 
-        val request = Request.Builder().url(url).build()
+        val request = Request.Builder()
+            .url(url)
+            .header("Host", "localhost:${GeminiConfig.openClawPort}")
+            .build()
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d(TAG, "WebSocket opened")

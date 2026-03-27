@@ -53,7 +53,9 @@ class OpenClawEventClient {
     let config = URLSessionConfiguration.default
     config.timeoutIntervalForRequest = 30
     session = URLSession(configuration: config)
-    webSocketTask = session?.webSocketTask(with: url)
+    var request = URLRequest(url: url)
+    request.setValue("localhost:\(port)", forHTTPHeaderField: "Host")
+    webSocketTask = session?.webSocketTask(with: request)
     webSocketTask?.resume()
 
     NSLog("[OpenClawWS] Connecting to %@", url.absoluteString)
