@@ -31,6 +31,9 @@ class OpenClawEventClient {
     // Pending RPC responses keyed by request ID
     private val pendingResponses = mutableMapOf<String, (JSONObject) -> Unit>()
 
+    // Pending chat.send results keyed by runId — waits for the "chat" event with state="final"
+    private val pendingChatResults = mutableMapOf<String, (String?) -> Unit>()
+
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .pingInterval(10, TimeUnit.SECONDS)
@@ -128,6 +131,44 @@ class OpenClawEventClient {
             "connect.challenge" -> sendConnectHandshake()
             "heartbeat" -> handleHeartbeatEvent(payload)
             "cron" -> handleCronEvent(payload)
+            "chat" -> handleChatEvent(payload)
+        }
+    }
+
+    private fun handleChatEvent(payload: JSONObject) {
+        val state = payload.optString("state", "")
+        val runId = payload.optString("runId", "")
+
+        if (state == "final" && runId.isNotEmpty()) {
+            val callback = pendingChatResults.remove(runId)
+            if (callback != null) {
+                // Extract reply text from message.content
+                val message = payload.optJSONObject("message")
+                val content = message?.opt("content")
+                val replyText = when {
+                    content is String -> content
+                    content is JSONArray -> {
+                        val parts = mutableListOf<String>()
+                        for (i in 0 until content.length()) {
+                            val part = content.optJSONObject(i)
+                            if (part?.optString("type") == "text") {
+                                parts.add(part.optString("text", ""))
+                            }
+                        }
+                        parts.joinToString("\n").ifEmpty { null }
+                    }
+                    else -> null
+                }
+                Log.d(TAG, "chat final for $runId: ${replyText?.take(200)}")
+                callback(replyText ?: "Agent completed but returned no text.")
+            }
+        } else if (state == "error" && runId.isNotEmpty()) {
+            val callback = pendingChatResults.remove(runId)
+            if (callback != null) {
+                val errorMsg = payload.optString("errorMessage", "Agent error")
+                Log.e(TAG, "chat error for $runId: $errorMsg")
+                callback(null)
+            }
         }
     }
 
@@ -221,20 +262,17 @@ class OpenClawEventClient {
             put("params", params)
         }
 
-        // Register callback for response
+        // Register callback for RPC ack — then wait for the actual chat event
         pendingResponses[reqId] = { response ->
             val ok = response.optBoolean("ok", false)
             if (ok) {
-                val payload = response.optJSONObject("payload")
-                val reply = payload?.optString("reply", null)
-                    ?: payload?.optJSONObject("result")?.optString("text", null)
-                    ?: payload?.toString()
-                Log.d(TAG, "chat.send success: ${reply?.take(200)}")
-                onResult(reply)
+                // RPC accepted — now wait for the "chat" event with state="final"
+                Log.d(TAG, "chat.send accepted, waiting for agent reply (runId=$reqId)")
+                pendingChatResults[reqId] = onResult
             } else {
                 val error = response.optJSONObject("error")
                 val msg = error?.optString("message", "unknown") ?: "unknown"
-                Log.e(TAG, "chat.send failed: $msg")
+                Log.e(TAG, "chat.send rejected: $msg")
                 onResult(null)
             }
         }
