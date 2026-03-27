@@ -172,16 +172,39 @@ class OpenClawBridge {
 
     suspend fun delegateTask(
         task: String,
-        toolName: String = "execute"
+        toolName: String = "execute",
+        imageBase64: String? = null
     ): ToolResult = withContext(Dispatchers.IO) {
         _lastToolCallStatus.value = ToolCallStatus.Executing(toolName)
 
         val url = "${GeminiConfig.openClawHost}:${GeminiConfig.openClawPort}/v1/chat/completions"
 
-        conversationHistory.add(JSONObject().apply {
-            put("role", "user")
-            put("content", task)
-        })
+        // Build user message — text-only or multimodal (OpenAI vision format)
+        val userMessage = if (imageBase64 != null) {
+            Log.d(TAG, "Attaching image (${imageBase64.length / 1024} KB base64) to task")
+            JSONObject().apply {
+                put("role", "user")
+                put("content", org.json.JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("type", "text")
+                        put("text", task)
+                    })
+                    put(JSONObject().apply {
+                        put("type", "image_url")
+                        put("image_url", JSONObject().apply {
+                            put("url", "data:image/jpeg;base64,$imageBase64")
+                        })
+                    })
+                })
+            }
+        } else {
+            JSONObject().apply {
+                put("role", "user")
+                put("content", task)
+            }
+        }
+
+        conversationHistory.add(userMessage)
 
         if (conversationHistory.size > MAX_HISTORY_TURNS * 2) {
             val trimmed = conversationHistory.takeLast(MAX_HISTORY_TURNS * 2)

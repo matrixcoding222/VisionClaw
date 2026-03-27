@@ -61,24 +61,25 @@ class ToolCallRouter(
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
 
-            // Only upload image when Gemini explicitly requests it via include_image=true
+            // Only attach image when Gemini explicitly requests it via include_image=true
             val includeImage = call.args["include_image"] as? Boolean ?: false
             val bitmap = if (includeImage) latestFrameProvider() else null
             Log.d(TAG, "include_image=$includeImage, bitmapNull=${bitmap == null}")
-            val imageUrl: String? = if (includeImage && SettingsManager.videoStreamingEnabled && bitmap != null) {
+
+            val imageBase64: String? = if (includeImage && bitmap != null) {
                 try {
                     val baos = ByteArrayOutputStream()
                     bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY_FOR_UPLOAD, baos)
-                    bridge.uploadToolCallImage(baos.toByteArray())
+                    android.util.Base64.encodeToString(baos.toByteArray(), android.util.Base64.NO_WRAP)
                 } catch (e: Exception) {
-                    Log.w(TAG, "Image upload failed for tool-call $callId: ${e.message}")
+                    Log.w(TAG, "Image encoding failed for tool-call $callId: ${e.message}")
                     null
                 }
             } else {
                 null
             }
 
-            // OpenClaw로 넘기는 최종 "명령 텍스트" 포맷
+            // Build task payload with original instruction context
             val taskPayload = buildString {
                 if (original != null) {
                     append("[original_instruction]\n")
@@ -87,14 +88,9 @@ class ToolCallRouter(
                 }
                 append("[gemini_rewritten_instruction]\n")
                 append(rewrittenTask)
-
-                if (!imageUrl.isNullOrEmpty()) {
-                    append("\n\n[tool_call_image_url]\n")
-                    append(imageUrl)
-                }
             }
 
-            val result = bridge.delegateTask(task = taskPayload, toolName = callName)
+            val result = bridge.delegateTask(task = taskPayload, toolName = callName, imageBase64 = imageBase64)
 
             // 취소된 경우 응답 보내지 않음
             if (!isActive) {
