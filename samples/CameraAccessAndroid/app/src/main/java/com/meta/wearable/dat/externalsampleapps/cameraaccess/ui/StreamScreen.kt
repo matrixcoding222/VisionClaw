@@ -231,10 +231,9 @@ fun StreamScreen(
                         }
                     }
 
-                    // Tab switcher (only when Gemini is active)
-                    if (geminiUiState.isGeminiActive) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        SingleChoiceSegmentedButtonRow {
+                    // Tab switcher (always visible for chat history access)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    SingleChoiceSegmentedButtonRow {
                             tabOptions.forEachIndexed { index, label ->
                                 SegmentedButton(
                                     shape = SegmentedButtonDefaults.itemShape(index = index, count = tabOptions.size),
@@ -245,7 +244,6 @@ fun StreamScreen(
                                 }
                             }
                         }
-                    }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
