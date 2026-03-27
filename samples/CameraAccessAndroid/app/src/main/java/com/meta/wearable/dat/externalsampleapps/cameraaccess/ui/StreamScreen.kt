@@ -19,14 +19,21 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -38,11 +45,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.gallery.CapturedPhoto
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -75,8 +84,30 @@ fun StreamScreen(
     val streamUiState by streamViewModel.uiState.collectAsStateWithLifecycle()
     val geminiUiState by geminiViewModel.uiState.collectAsStateWithLifecycle()
     val webrtcUiState by webrtcViewModel.uiState.collectAsStateWithLifecycle()
+    val captureEvent by geminiViewModel.captureEvent.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
+
+    // Gallery navigation state
+    var showGallery by remember { mutableStateOf(false) }
+    var selectedGalleryPhoto by remember { mutableStateOf<CapturedPhoto?>(null) }
+
+    // Show toast when photo is captured via Gemini
+    LaunchedEffect(captureEvent) {
+        captureEvent?.let {
+            Toast.makeText(context, "Photo captured", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Gallery screens
+    if (selectedGalleryPhoto != null) {
+        GalleryDetailScreen(photo = selectedGalleryPhoto!!, onBack = { selectedGalleryPhoto = null })
+        return
+    }
+    if (showGallery) {
+        GalleryScreen(onBack = { showGallery = false }, onPhotoSelected = { selectedGalleryPhoto = it })
+        return
+    }
 
     // Wire Gemini VM to Stream VM for frame forwarding
     LaunchedEffect(geminiViewModel) {
@@ -192,6 +223,23 @@ fun StreamScreen(
                         },
                         modifier = Modifier.widthIn(min = 160.dp),
                     )
+
+                    // Gallery button
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.Black.copy(alpha = 0.5f),
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        IconButton(onClick = { showGallery = true }) {
+                            Icon(
+                                Icons.Default.PhotoLibrary,
+                                contentDescription = "Gallery",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
 
                     // Tab switcher (only when Gemini is active)
                     if (geminiUiState.isGeminiActive) {

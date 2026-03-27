@@ -103,7 +103,27 @@ sealed class OpenClawConnectionState {
 
 object ToolDeclarations {
     fun allDeclarationsJSON(): JSONArray {
-        return JSONArray().put(executeJSON())
+        return JSONArray().apply {
+            put(executeJSON())
+            put(capturePhotoJSON())
+        }
+    }
+
+    private fun capturePhotoJSON(): JSONObject {
+        return JSONObject().apply {
+            put("name", "capture_photo")
+            put("description", "Capture and save the current camera frame as a photo. Use when the user asks to take a photo, capture what they see, save a picture, or snap a photo.")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("description", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Brief description of what is in the photo")
+                    })
+                })
+                put("required", JSONArray())
+            })
+        }
     }
 
     private fun executeJSON(): JSONObject {

@@ -24,6 +24,9 @@ class ToolCallRouter(
         private const val JPEG_QUALITY_FOR_UPLOAD = 92
     }
 
+    /** Callback for local capture_photo handling. */
+    var onCapturePhoto: ((description: String?, completion: (ToolResult) -> Unit) -> Unit)? = null
+
     private val inFlightJobs = mutableMapOf<String, Job>()
 
     fun handleToolCall(
@@ -34,6 +37,20 @@ class ToolCallRouter(
         val callName = call.name
 
         Log.d(TAG, "Received: $callName (id: $callId) args: ${call.args}")
+
+        // Local tool: capture_photo — handle on-device, don't send to OpenClaw
+        if (callName == "capture_photo") {
+            val description = call.args["description"]?.toString()
+            onCapturePhoto?.invoke(description) { result ->
+                Log.d(TAG, "capture_photo result: $result")
+                val response = buildToolResponse(callId, callName, result)
+                sendResponse(response)
+            } ?: run {
+                val response = buildToolResponse(callId, callName, ToolResult.Failure("capture_photo handler not configured"))
+                sendResponse(response)
+            }
+            return
+        }
 
         val job = scope.launch {
             // Gemini가 tool-call args로 준 "정리된" task (이미 rewriting 된 텍스트)
