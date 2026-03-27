@@ -47,20 +47,22 @@ struct StreamView: View {
           .padding(.bottom, 80)
       }
 
-      // Tab picker at top
-      if geminiVM.isGeminiActive {
-        VStack {
-          HStack {
+      // Top bar
+      VStack {
+        HStack {
+          if geminiVM.isGeminiActive {
             GeminiStatusBar(geminiVM: geminiVM)
-            Spacer()
-            Button(action: { showGallery = true }) {
-              Image(systemName: "photo.on.rectangle")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.white)
-                .padding(8)
-                .background(Color.black.opacity(0.5))
-                .clipShape(Circle())
-            }
+          }
+          Spacer()
+          Button(action: { showGallery = true }) {
+            Image(systemName: "photo.on.rectangle")
+              .font(.system(size: 16, weight: .medium))
+              .foregroundColor(.white)
+              .padding(8)
+              .background(Color.black.opacity(0.5))
+              .clipShape(Circle())
+          }
+          if geminiVM.isGeminiActive {
             Picker("", selection: $selectedTab) {
               ForEach(StreamTab.allCases, id: \.self) { tab in
                 Text(tab.rawValue).tag(tab)
@@ -69,11 +71,11 @@ struct StreamView: View {
             .pickerStyle(.segmented)
             .frame(width: 140)
           }
-          Spacer()
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 24)
+        Spacer()
       }
+      .padding(.horizontal, 24)
+      .padding(.top, 24)
 
       // WebRTC status overlay (top)
       if webrtcVM.isActive && selectedTab == .camera {
