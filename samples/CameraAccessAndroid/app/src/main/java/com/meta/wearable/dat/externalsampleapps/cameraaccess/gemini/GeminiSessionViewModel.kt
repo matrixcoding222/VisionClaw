@@ -459,16 +459,16 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun syncProactiveNotifications() {
-        if (!SettingsManager.proactiveNotificationsEnabled) {
-            eventClient.disconnect()
-            return
-        }
-
-        eventClient.onNotification = { text ->
-            val state = _uiState.value
-            if (state.isGeminiActive && state.connectionState == GeminiConnectionState.Ready) {
-                geminiService.sendTextMessage(text)
+        // Always connect event client — needed for image sending via chat.send
+        if (SettingsManager.proactiveNotificationsEnabled) {
+            eventClient.onNotification = { text ->
+                val state = _uiState.value
+                if (state.isGeminiActive && state.connectionState == GeminiConnectionState.Ready) {
+                    geminiService.sendTextMessage(text)
+                }
             }
+        } else {
+            eventClient.onNotification = null
         }
         eventClient.connect()
     }

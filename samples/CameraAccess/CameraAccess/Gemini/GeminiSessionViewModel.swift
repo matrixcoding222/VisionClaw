@@ -227,7 +227,7 @@ class GeminiSessionViewModel: ObservableObject {
       return
     }
 
-    // Connect to OpenClaw event stream for proactive notifications
+    // Always connect event client — needed for image sending via chat.send
     if SettingsManager.shared.proactiveNotificationsEnabled {
       eventClient.onNotification = { [weak self] text in
         guard let self else { return }
@@ -236,8 +236,10 @@ class GeminiSessionViewModel: ObservableObject {
           self.geminiService.sendTextMessage(text)
         }
       }
-      eventClient.connect()
+    } else {
+      eventClient.onNotification = nil
     }
+    eventClient.connect()
   }
 
   func stopSession() {
