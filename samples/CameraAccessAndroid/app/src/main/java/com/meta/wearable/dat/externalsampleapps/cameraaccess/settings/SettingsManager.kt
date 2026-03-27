@@ -71,6 +71,8 @@ The capture_photo tool saves the current camera frame as a photo to the device g
 Use it when the user asks to take a photo, capture what they see, save a picture, or snap a photo.
 You can include an optional description of what is in the photo.
 
+When calling execute, set include_image=true if the task requires the assistant to SEE what you see (e.g. editing a photo, identifying a product by appearance, reading text from a sign, or any task where visual context is needed). Do NOT set it for tasks that can be fully described in text.
+
 The execute tool connects you to a powerful personal assistant that can:
 - Send messages (WhatsApp, Telegram, iMessage, Slack, etc.)
 - Search the web or look up information
