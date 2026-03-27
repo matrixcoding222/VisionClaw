@@ -225,8 +225,24 @@ fun StreamScreen(
                         modifier = Modifier.widthIn(min = 160.dp),
                     )
 
-                    // Gallery button
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    // Tab switcher (centered)
+                    SingleChoiceSegmentedButtonRow {
+                        tabOptions.forEachIndexed { index, label ->
+                            SegmentedButton(
+                                shape = SegmentedButtonDefaults.itemShape(index = index, count = tabOptions.size),
+                                onClick = { coroutineScope.launch { pagerState.animateScrollToPage(index) } },
+                                selected = pagerState.currentPage == index,
+                            ) {
+                                Text(label)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    // Gallery button (top right)
                     Surface(
                         shape = CircleShape,
                         color = Color.Black.copy(alpha = 0.5f),
@@ -241,20 +257,6 @@ fun StreamScreen(
                             )
                         }
                     }
-
-                    // Tab switcher (always visible for chat history access)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    SingleChoiceSegmentedButtonRow {
-                            tabOptions.forEachIndexed { index, label ->
-                                SegmentedButton(
-                                    shape = SegmentedButtonDefaults.itemShape(index = index, count = tabOptions.size),
-                                    onClick = { coroutineScope.launch { pagerState.animateScrollToPage(index) } },
-                                    selected = pagerState.currentPage == index,
-                                ) {
-                                    Text(label)
-                                }
-                            }
-                        }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -279,7 +281,6 @@ fun StreamScreen(
                     streamViewModel.stopStream()
                     wearablesViewModel.navigateToDeviceSelection()
                 },
-                onCapturePhoto = { streamViewModel.capturePhoto() },
                 onToggleAI = {
                     if (geminiUiState.isGeminiActive) {
                         geminiViewModel.stopSession()

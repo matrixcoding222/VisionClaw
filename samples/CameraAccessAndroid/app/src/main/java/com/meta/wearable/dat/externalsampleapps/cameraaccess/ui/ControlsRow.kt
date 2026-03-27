@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ControlsRow(
     onStopStream: () -> Unit,
-    onCapturePhoto: () -> Unit,
     onToggleAI: () -> Unit,
     isAIActive: Boolean,
     onToggleMic: () -> Unit,
@@ -44,10 +43,6 @@ fun ControlsRow(
             onClick = onStopStream,
             isDestructive = true,
             modifier = Modifier.weight(1f),
-        )
-
-        CaptureButton(
-            onClick = onCapturePhoto,
         )
 
         // AI toggle button
