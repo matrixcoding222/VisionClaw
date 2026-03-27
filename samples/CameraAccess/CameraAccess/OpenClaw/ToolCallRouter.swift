@@ -42,8 +42,8 @@ class ToolCallRouter {
 
     let task = Task { @MainActor in
       let taskDesc = call.args["task"] as? String ?? String(describing: call.args)
-      // Always attach latest frame when video streaming is enabled (like Oversite)
-      let includeImage = call.args["include_image"] as? Bool ?? SettingsManager.shared.videoStreamingEnabled
+      // Attach image only when Gemini explicitly sets include_image=true
+      let includeImage = call.args["include_image"] as? Bool ?? false
       let image: UIImage? = includeImage ? latestFrame : nil
       let result = await bridge.delegateTask(task: taskDesc, toolName: callName, image: image)
 
