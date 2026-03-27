@@ -225,6 +225,7 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             openClawBridge.checkConnection()
             openClawBridge.resetSession()
+            openClawBridge.eventClient = eventClient
 
             toolCallRouter = ToolCallRouter(
                 bridge = openClawBridge,

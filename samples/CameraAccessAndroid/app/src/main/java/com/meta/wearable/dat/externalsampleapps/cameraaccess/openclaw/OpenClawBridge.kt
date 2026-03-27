@@ -5,8 +5,10 @@ import android.util.Log
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
@@ -37,6 +39,9 @@ class OpenClawBridge {
     private val _connectionState =
         MutableStateFlow<OpenClawConnectionState>(OpenClawConnectionState.NotConfigured)
     val connectionState: StateFlow<OpenClawConnectionState> = _connectionState.asStateFlow()
+
+    /** Set by GeminiSessionViewModel so we can send image tasks via WebSocket */
+    var eventClient: OpenClawEventClient? = null
 
     fun setToolCallStatus(status: ToolCallStatus) {
         _lastToolCallStatus.value = status
@@ -177,31 +182,22 @@ class OpenClawBridge {
     ): ToolResult = withContext(Dispatchers.IO) {
         _lastToolCallStatus.value = ToolCallStatus.Executing(toolName)
 
+        // If image is provided, route through WebSocket chat.send (only working method)
+        if (imageBase64 != null) {
+            val ec = eventClient
+            if (ec == null) {
+                Log.w(TAG, "Image task but no event client, falling back to text-only HTTP")
+            } else {
+                Log.d(TAG, "Sending image task via WebSocket chat.send (${imageBase64.length / 1024} KB)")
+                return@withContext sendViaWebSocket(ec, task, imageBase64, toolName)
+            }
+        }
+
         val url = "${GeminiConfig.openClawHost}:${GeminiConfig.openClawPort}/v1/chat/completions"
 
-        // Build user message — text-only or multimodal (OpenAI vision format)
-        val userMessage = if (imageBase64 != null) {
-            Log.d(TAG, "Attaching image (${imageBase64.length / 1024} KB base64) to task")
-            JSONObject().apply {
-                put("role", "user")
-                put("content", org.json.JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("type", "text")
-                        put("text", task)
-                    })
-                    put(JSONObject().apply {
-                        put("type", "image_url")
-                        put("image_url", JSONObject().apply {
-                            put("url", "data:image/jpeg;base64,$imageBase64")
-                        })
-                    })
-                })
-            }
-        } else {
-            JSONObject().apply {
-                put("role", "user")
-                put("content", task)
-            }
+        val userMessage = JSONObject().apply {
+            put("role", "user")
+            put("content", task)
         }
 
         conversationHistory.add(userMessage)
@@ -275,4 +271,37 @@ class OpenClawBridge {
         }
     }
 
+    /**
+     * Send a task with image via WebSocket chat.send RPC.
+     * This is the only method that reliably passes images to the OpenClaw agent.
+     */
+    private suspend fun sendViaWebSocket(
+        eventClient: OpenClawEventClient,
+        task: String,
+        imageBase64: String,
+        toolName: String
+    ): ToolResult = suspendCancellableCoroutine { continuation ->
+        eventClient.sendChatMessage(
+            sessionKey = sessionKey,
+            message = task,
+            imageBase64 = imageBase64
+        ) { reply ->
+            if (reply != null) {
+                conversationHistory.add(JSONObject().apply {
+                    put("role", "user")
+                    put("content", task)
+                })
+                conversationHistory.add(JSONObject().apply {
+                    put("role", "assistant")
+                    put("content", reply)
+                })
+                Log.d(TAG, "WebSocket chat.send result: ${reply.take(200)}")
+                _lastToolCallStatus.value = ToolCallStatus.Completed(toolName)
+                continuation.resume(ToolResult.Success(reply)) {}
+            } else {
+                _lastToolCallStatus.value = ToolCallStatus.Failed(toolName, "WebSocket chat.send failed")
+                continuation.resume(ToolResult.Failure("Failed to send image via WebSocket")) {}
+            }
+        }
+    }
 }

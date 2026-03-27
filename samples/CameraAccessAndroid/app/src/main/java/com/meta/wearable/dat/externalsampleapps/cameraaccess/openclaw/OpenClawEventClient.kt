@@ -28,6 +28,9 @@ class OpenClawEventClient {
     private var reconnectDelayMs = 2_000L
     private val handler = Handler(Looper.getMainLooper())
 
+    // Pending RPC responses keyed by request ID
+    private val pendingResponses = mutableMapOf<String, (JSONObject) -> Unit>()
+
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .pingInterval(10, TimeUnit.SECONDS)
@@ -93,15 +96,22 @@ class OpenClawEventClient {
             when (type) {
                 "event" -> handleEvent(json)
                 "res" -> {
-                    val ok = json.optBoolean("ok", false)
-                    if (ok) {
-                        Log.d(TAG, "Connected and authenticated")
-                        isConnected = true
-                        reconnectDelayMs = 2_000L
+                    val id = json.optString("id", "")
+                    val callback = pendingResponses.remove(id)
+                    if (callback != null) {
+                        callback(json)
                     } else {
-                        val error = json.optJSONObject("error")
-                        val msg = error?.optString("message", "unknown") ?: "unknown"
-                        Log.e(TAG, "Connect failed: $msg")
+                        // Connect handshake response
+                        val ok = json.optBoolean("ok", false)
+                        if (ok) {
+                            Log.d(TAG, "Connected and authenticated")
+                            isConnected = true
+                            reconnectDelayMs = 2_000L
+                        } else {
+                            val error = json.optJSONObject("error")
+                            val msg = error?.optString("message", "unknown") ?: "unknown"
+                            Log.e(TAG, "Connect failed: $msg")
+                        }
                     }
                 }
             }
@@ -169,6 +179,74 @@ class OpenClawEventClient {
 
         Log.d(TAG, "Cron notification: ${summary.take(100)}")
         onNotification?.invoke("[Scheduled update] $summary")
+    }
+
+    /**
+     * Send a chat message with optional image attachment via WebSocket chat.send RPC.
+     * This is the only way to reliably pass images to the OpenClaw agent.
+     * Returns the agent's reply text, or null on failure.
+     */
+    fun sendChatMessage(
+        sessionKey: String,
+        message: String,
+        imageBase64: String? = null,
+        imageMimeType: String = "image/jpeg",
+        onResult: (String?) -> Unit
+    ) {
+        if (!isConnected || webSocket == null) {
+            Log.e(TAG, "Cannot send chat.send: not connected")
+            onResult(null)
+            return
+        }
+
+        val reqId = UUID.randomUUID().toString()
+
+        val params = JSONObject().apply {
+            put("sessionKey", sessionKey)
+            put("message", message)
+            put("idempotencyKey", reqId)
+            if (imageBase64 != null) {
+                put("attachments", JSONArray().put(JSONObject().apply {
+                    put("mimeType", imageMimeType)
+                    put("fileName", "camera_frame.jpg")
+                    put("content", imageBase64)
+                }))
+            }
+        }
+
+        val request = JSONObject().apply {
+            put("type", "req")
+            put("id", reqId)
+            put("method", "chat.send")
+            put("params", params)
+        }
+
+        // Register callback for response
+        pendingResponses[reqId] = { response ->
+            val ok = response.optBoolean("ok", false)
+            if (ok) {
+                val payload = response.optJSONObject("payload")
+                val reply = payload?.optString("reply", null)
+                    ?: payload?.optJSONObject("result")?.optString("text", null)
+                    ?: payload?.toString()
+                Log.d(TAG, "chat.send success: ${reply?.take(200)}")
+                onResult(reply)
+            } else {
+                val error = response.optJSONObject("error")
+                val msg = error?.optString("message", "unknown") ?: "unknown"
+                Log.e(TAG, "chat.send failed: $msg")
+                onResult(null)
+            }
+        }
+
+        val sent = webSocket?.send(request.toString()) ?: false
+        if (!sent) {
+            pendingResponses.remove(reqId)
+            Log.e(TAG, "Failed to send chat.send WebSocket message")
+            onResult(null)
+        } else {
+            Log.d(TAG, "chat.send sent (id=$reqId, hasImage=${imageBase64 != null})")
+        }
     }
 
     private fun scheduleReconnect() {
