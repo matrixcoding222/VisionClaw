@@ -61,10 +61,11 @@ class ToolCallRouter(
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
 
-            // tool-call 시점에만 스냅샷 업로드 (원본 해상도 유지, JPEG로만 인코딩)
-            val bitmap = latestFrameProvider()
-            Log.d("ToolCallRouter", "toolcall bitmapNull=${latestFrameProvider()==null}")
-            val imageUrl: String? = if (SettingsManager.videoStreamingEnabled && bitmap != null) {
+            // Only upload image when Gemini explicitly requests it via include_image=true
+            val includeImage = call.args["include_image"] as? Boolean ?: false
+            val bitmap = if (includeImage) latestFrameProvider() else null
+            Log.d(TAG, "include_image=$includeImage, bitmapNull=${bitmap == null}")
+            val imageUrl: String? = if (includeImage && SettingsManager.videoStreamingEnabled && bitmap != null) {
                 try {
                     val baos = ByteArrayOutputStream()
                     bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY_FOR_UPLOAD, baos)
