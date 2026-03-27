@@ -28,6 +28,9 @@ class OpenClawEventClient {
   func disconnect() {
     shouldReconnect = false
     isConnected = false
+    // Cancel all pending callbacks so they don't fire after session stops
+    pendingResponses.removeAll()
+    pendingChatResults.removeAll()
     webSocketTask?.cancel(with: .normalClosure, reason: nil)
     webSocketTask = nil
     session?.invalidateAndCancel()

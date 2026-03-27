@@ -53,6 +53,9 @@ class OpenClawEventClient {
         shouldReconnect = false
         isConnected = false
         handler.removeCallbacksAndMessages(null)
+        // Cancel all pending callbacks so they don't fire after session stops
+        pendingResponses.clear()
+        pendingChatResults.clear()
         webSocket?.close(1000, null)
         webSocket = null
         Log.d(TAG, "Disconnected")
