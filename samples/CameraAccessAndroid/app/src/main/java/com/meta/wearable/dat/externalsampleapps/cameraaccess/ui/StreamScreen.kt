@@ -290,14 +290,6 @@ fun StreamScreen(
                 isAIActive = geminiUiState.isGeminiActive,
                 onToggleMic = { geminiViewModel.toggleMic() },
                 isMicEnabled = geminiUiState.isMicEnabled,
-                onToggleLive = {
-                    if (webrtcUiState.isActive) {
-                        webrtcViewModel.stopSession()
-                    } else {
-                        webrtcViewModel.startSession()
-                    }
-                },
-                isLiveActive = webrtcUiState.isActive,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
