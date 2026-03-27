@@ -144,7 +144,7 @@ object ToolDeclarations {
                 })
                 put("required", JSONArray().put("task"))
             })
-            put("behavior", "BLOCKING")
+            put("behavior", "NON_BLOCKING")
         }
     }
 }
