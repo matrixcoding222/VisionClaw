@@ -250,6 +250,12 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
 
+            // Auto-save to gallery when image is attached to execute call
+            toolCallRouter?.onAutoSaveFrame = { bitmap, description ->
+                PhotoCaptureStore.saveFrame(getApplication(), bitmap, description)
+                _captureEvent.value = PhotoCaptureStore.photos.value.firstOrNull()
+            }
+
             // Load gallery
             PhotoCaptureStore.loadPhotos(getApplication())
 

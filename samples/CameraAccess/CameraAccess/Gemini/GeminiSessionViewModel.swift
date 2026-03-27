@@ -127,6 +127,14 @@ class GeminiSessionViewModel: ObservableObject {
       }
     }
 
+    // Auto-save to gallery when image is attached to execute call
+    toolCallRouter?.onAutoSaveFrame = { [weak self] image, description in
+      guard let self else { return }
+      if let photo = self.photoCaptureStore.saveFrame(image, description: description) {
+        self.lastCapturedPhoto = photo
+      }
+    }
+
     geminiService.onToolCall = { [weak self] toolCall in
       guard let self else { return }
       Task { @MainActor in

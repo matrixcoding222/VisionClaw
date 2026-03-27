@@ -27,6 +27,9 @@ class ToolCallRouter(
     /** Callback for local capture_photo handling. */
     var onCapturePhoto: ((description: String?, completion: (ToolResult) -> Unit) -> Unit)? = null
 
+    /** Callback to auto-save frame to gallery when image is attached to execute call. */
+    var onAutoSaveFrame: ((Bitmap, String?) -> Unit)? = null
+
     private val inFlightJobs = mutableMapOf<String, Job>()
 
     fun handleToolCall(
@@ -68,6 +71,8 @@ class ToolCallRouter(
 
             val imageBase64: String? = if (includeImage && bitmap != null) {
                 try {
+                    // Auto-save to gallery
+                    onAutoSaveFrame?.invoke(bitmap, rewrittenTask.take(100))
                     val baos = ByteArrayOutputStream()
                     bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY_FOR_UPLOAD, baos)
                     android.util.Base64.encodeToString(baos.toByteArray(), android.util.Base64.NO_WRAP)

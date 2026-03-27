@@ -12,6 +12,9 @@ class ToolCallRouter {
   /// Latest camera frame for include_image on execute tool calls.
   var latestFrame: UIImage?
 
+  /// Callback to auto-save frame to gallery when image is attached to execute call.
+  var onAutoSaveFrame: ((_ image: UIImage, _ description: String?) -> Void)?
+
   init(bridge: OpenClawBridge) {
     self.bridge = bridge
   }
@@ -45,6 +48,10 @@ class ToolCallRouter {
       // Attach image only when Gemini explicitly sets include_image=true
       let includeImage = call.args["include_image"] as? Bool ?? false
       let image: UIImage? = includeImage ? latestFrame : nil
+      // Auto-save to gallery when image is attached
+      if let image {
+        onAutoSaveFrame?(image, String(taskDesc.prefix(100)))
+      }
       let result = await bridge.delegateTask(task: taskDesc, toolName: callName, image: image)
 
       guard !Task.isCancelled else {
