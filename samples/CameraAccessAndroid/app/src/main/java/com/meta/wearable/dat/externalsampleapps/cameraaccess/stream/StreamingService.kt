@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.net.wifi.WifiManager
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -51,6 +52,7 @@ class StreamingService : Service() {
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -77,6 +79,7 @@ class StreamingService : Service() {
         }
 
         acquireWakeLock()
+        acquireWifiLock()
 
         return START_STICKY
     }
@@ -84,6 +87,7 @@ class StreamingService : Service() {
     override fun onDestroy() {
         Log.d(TAG, "Service destroyed")
         releaseWakeLock()
+        releaseWifiLock()
         super.onDestroy()
     }
 
@@ -132,9 +136,9 @@ class StreamingService : Service() {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock =
                 powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG).apply {
-                    acquire(10 * 60 * 1000L) // 10 minutes max
+                    acquire() // No timeout — held for entire streaming session
                 }
-            Log.d(TAG, "WakeLock acquired")
+            Log.d(TAG, "WakeLock acquired (indefinite)")
         }
     }
 
@@ -146,5 +150,28 @@ class StreamingService : Service() {
             }
         }
         wakeLock = null
+    }
+
+    private fun acquireWifiLock() {
+        if (wifiLock == null) {
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            wifiLock = wifiManager.createWifiLock(
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                "VisionClaw::GeminiWiFiLock"
+            ).apply {
+                acquire()
+            }
+            Log.d(TAG, "WiFiLock acquired")
+        }
+    }
+
+    private fun releaseWifiLock() {
+        wifiLock?.let {
+            if (it.isHeld) {
+                it.release()
+                Log.d(TAG, "WiFiLock released")
+            }
+        }
+        wifiLock = null
     }
 }
