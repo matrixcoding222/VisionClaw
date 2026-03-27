@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 enum OpenClawConnectionState: Equatable {
   case notConfigured
@@ -15,7 +16,7 @@ class OpenClawBridge: ObservableObject {
   private let session: URLSession
   private let pingSession: URLSession
   private var sessionKey: String
-  private var conversationHistory: [[String: String]] = []
+  private var conversationHistory: [[String: Any]] = []
   private let maxHistoryTurns = 10
 
   private static let stableSessionKey = "agent:main:glass"
@@ -69,7 +70,8 @@ class OpenClawBridge: ObservableObject {
 
   func delegateTask(
     task: String,
-    toolName: String = "execute"
+    toolName: String = "execute",
+    image: UIImage? = nil
   ) async -> ToolResult {
     lastToolCallStatus = .executing(toolName)
 
@@ -78,8 +80,23 @@ class OpenClawBridge: ObservableObject {
       return .failure("Invalid gateway URL")
     }
 
-    // Append the new user message to conversation history
-    conversationHistory.append(["role": "user", "content": task])
+    // Build user message — text-only or multimodal (OpenAI vision format)
+    let userMessage: [String: Any]
+    if let image = image, let jpegData = image.jpegData(compressionQuality: 0.8) {
+      let base64 = jpegData.base64EncodedString()
+      userMessage = [
+        "role": "user",
+        "content": [
+          ["type": "text", "text": task],
+          ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\(base64)"]]
+        ] as [[String: Any]]
+      ]
+      NSLog("[OpenClaw] Attaching image (%d KB) to task", jpegData.count / 1024)
+    } else {
+      userMessage = ["role": "user", "content": task]
+    }
+
+    conversationHistory.append(userMessage)
 
     // Trim history to keep only the most recent turns (user+assistant pairs)
     if conversationHistory.count > maxHistoryTurns * 2 {
@@ -99,7 +116,7 @@ class OpenClawBridge: ObservableObject {
       "stream": false
     ]
 
-    NSLog("[OpenClaw] Sending %d messages in conversation", conversationHistory.count)
+    NSLog("[OpenClaw] Sending %d messages in conversation%@", conversationHistory.count, image != nil ? " (with image)" : "")
 
     do {
       request.httpBody = try JSONSerialization.data(withJSONObject: body)

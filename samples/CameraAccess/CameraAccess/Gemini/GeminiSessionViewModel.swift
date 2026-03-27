@@ -243,8 +243,9 @@ class GeminiSessionViewModel: ObservableObject {
   }
 
   func sendVideoFrameIfThrottled(image: UIImage) {
-    // Always keep latest frame for capture_photo
+    // Always keep latest frame for capture_photo and include_image
     latestVideoFrame = image
+    toolCallRouter?.latestFrame = image
     guard SettingsManager.shared.videoStreamingEnabled else { return }
     guard isGeminiActive, connectionState == .ready else { return }
     let now = Date()

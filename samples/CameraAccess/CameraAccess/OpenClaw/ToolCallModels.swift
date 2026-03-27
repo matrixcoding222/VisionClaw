@@ -112,6 +112,10 @@ enum ToolDeclarations {
         "task": [
           "type": "string",
           "description": "Clear, detailed description of what to do. Include all relevant context: names, content, platforms, quantities, etc."
+        ],
+        "include_image": [
+          "type": "boolean",
+          "description": "Set to true ONLY when the task requires the agent to see the current camera image (e.g. editing a photo, identifying a product by appearance, reading text from a sign). Do NOT set for tasks that can be described in text alone."
         ]
       ],
       "required": ["task"]

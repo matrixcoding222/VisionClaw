@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 @MainActor
 class ToolCallRouter {
@@ -7,6 +8,9 @@ class ToolCallRouter {
 
   /// Callback for local capture_photo handling. Called with (description, completion).
   var onCapturePhoto: ((_ description: String?, _ completion: @escaping (ToolResult) -> Void) -> Void)?
+
+  /// Latest camera frame for include_image on execute tool calls.
+  var latestFrame: UIImage?
 
   init(bridge: OpenClawBridge) {
     self.bridge = bridge
@@ -38,7 +42,9 @@ class ToolCallRouter {
 
     let task = Task { @MainActor in
       let taskDesc = call.args["task"] as? String ?? String(describing: call.args)
-      let result = await bridge.delegateTask(task: taskDesc, toolName: callName)
+      let includeImage = call.args["include_image"] as? Bool ?? false
+      let image: UIImage? = includeImage ? latestFrame : nil
+      let result = await bridge.delegateTask(task: taskDesc, toolName: callName, image: image)
 
       guard !Task.isCancelled else {
         NSLog("[ToolCall] Task %@ was cancelled, skipping response", callId)
