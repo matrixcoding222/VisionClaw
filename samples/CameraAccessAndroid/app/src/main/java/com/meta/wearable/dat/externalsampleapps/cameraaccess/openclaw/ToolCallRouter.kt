@@ -147,9 +147,7 @@ class ToolCallRouter(
                             JSONObject().apply {
                                 put("id", callId)
                                 put("name", name)
-                                put("response", result.toJSON().apply {
-                                    put("scheduling", "INTERRUPT")
-                                })
+                                put("response", result.toJSON())
                             }
                         )
                     )

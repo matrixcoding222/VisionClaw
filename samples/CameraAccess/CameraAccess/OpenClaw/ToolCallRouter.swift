@@ -105,7 +105,7 @@ class ToolCallRouter {
           [
             "id": callId,
             "name": name,
-            "response": result.responseValue.merging(["scheduling": "INTERRUPT"]) { _, new in new }
+            "response": result.responseValue
           ]
         ]
       ]
