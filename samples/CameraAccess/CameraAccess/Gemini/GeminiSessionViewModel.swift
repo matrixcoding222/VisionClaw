@@ -127,7 +127,17 @@ class GeminiSessionViewModel: ObservableObject {
       }
       if let photo = self.photoCaptureStore.saveFrame(frame, description: description) {
         self.lastCapturedPhoto = photo
-        completion(.success("Photo captured and saved: \(photo.filename)"))
+        // Also upload to Mac so agent can access the file
+        if let jpegData = frame.jpegData(compressionQuality: 0.9) {
+          let base64 = jpegData.base64EncodedString()
+          if let macPath = self.openClawBridge.uploadImageFile(base64) {
+            completion(.success("Photo captured and saved: \(photo.filename)\nAlso saved on Mac at: \(macPath)"))
+          } else {
+            completion(.success("Photo captured and saved: \(photo.filename)"))
+          }
+        } else {
+          completion(.success("Photo captured and saved: \(photo.filename)"))
+        }
       } else {
         completion(.failure("Failed to save photo"))
       }

@@ -155,7 +155,7 @@ class OpenClawBridge: ObservableObject {
   }
 
   /// Upload JPEG to the upload server so the agent can access the file on disk.
-  private func uploadImageFile(_ imageBase64: String) -> String? {
+  func uploadImageFile(_ imageBase64: String) -> String? {
     let uploadPort = GeminiConfig.openClawPort + 6 // upload server runs on gateway port + 6
     guard let url = URL(string: "\(GeminiConfig.openClawHost):\(uploadPort)/upload") else { return nil }
     guard let jpegData = Data(base64Encoded: imageBase64) else { return nil }

@@ -275,6 +275,8 @@ class OpenClawBridge {
      * Upload JPEG to the upload server so the agent can access the file on disk.
      * Returns the saved file path, or null if upload fails.
      */
+    fun uploadImageFilePublic(imageBase64: String): String? = uploadImageFile(imageBase64)
+
     private fun uploadImageFile(imageBase64: String): String? {
         val uploadPort = GeminiConfig.openClawPort + 6 // upload server runs on gateway port + 6
         val host = GeminiConfig.openClawHost.trimEnd('/')
