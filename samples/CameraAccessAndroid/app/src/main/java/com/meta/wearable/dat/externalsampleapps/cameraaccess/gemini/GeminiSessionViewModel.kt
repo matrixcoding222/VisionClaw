@@ -15,6 +15,9 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawCo
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawEventClient
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolCallRouter
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolCallStatus
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolResult
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.gallery.CapturedPhoto
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.gallery.PhotoCaptureStore
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingMode
 import kotlinx.coroutines.Job
@@ -43,6 +46,9 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _uiState = MutableStateFlow(GeminiUiState())
     val uiState: StateFlow<GeminiUiState> = _uiState.asStateFlow()
+
+    private val _captureEvent = MutableStateFlow<CapturedPhoto?>(null)
+    val captureEvent: StateFlow<CapturedPhoto?> = _captureEvent.asStateFlow()
 
     private val geminiService = GeminiLiveService()
     private val openClawBridge = OpenClawBridge()
@@ -148,6 +154,7 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
         // Start with mic enabled by default
         _uiState.value = _uiState.value.copy(isGeminiActive = true, isMicEnabled = true)
         audioManager.setMicEnabled(true)
+        RemoteLogger.log("session:start")
 
         netMonitor.start()
         netMonitorJob?.cancel()
@@ -176,6 +183,13 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         geminiService.onTurnComplete = {
+            // Log finalized transcripts before clearing
+            if (lastUserText.isNotEmpty()) {
+                RemoteLogger.log("voice:user", mapOf("text" to lastUserText))
+            }
+            if (lastAIText.isNotEmpty()) {
+                RemoteLogger.log("voice:ai", mapOf("text" to lastAIText))
+            }
             finalizeCurrentBubbles()
             _uiState.value = _uiState.value.copy(userTranscript = "")
         }
@@ -219,8 +233,30 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
                 originalInstructionProvider = { lastUserOriginalInstruction }
             )
 
+            // Local capture_photo handler
+            toolCallRouter?.onCapturePhoto = { description, completion ->
+                val frame = latestFrameForToolCall
+                if (frame != null) {
+                    val photo = PhotoCaptureStore.saveFrame(getApplication(), frame, description)
+                    if (photo != null) {
+                        _captureEvent.value = photo
+                        completion(ToolResult.Success("Photo captured and saved: ${photo.filename}"))
+                    } else {
+                        completion(ToolResult.Failure("Failed to save photo"))
+                    }
+                } else {
+                    completion(ToolResult.Failure("No camera frame available to capture"))
+                }
+            }
+
+            // Load gallery
+            PhotoCaptureStore.loadPhotos(getApplication())
+
             geminiService.onToolCall = { toolCall ->
                 for (call in toolCall.functionCalls) {
+                    val taskDesc = (call.args["task"] as? String) ?: ""
+                    RemoteLogger.log("voice:tool_call", mapOf("tool" to call.name, "task" to taskDesc))
+
                     finalizeCurrentBubbles()
                     val toolMsg = ChatMessage(
                         role = ChatMessageRole.ToolCall(call.name),
@@ -232,6 +268,7 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
                     _uiState.value = _uiState.value.copy(messages = msgs)
 
                     toolCallRouter?.handleToolCall(call) { response ->
+                        RemoteLogger.log("voice:tool_result", mapOf("tool" to call.name, "result" to response.toString().take(500)))
                         val updated = _uiState.value.messages.map {
                             if (it.id == toolMsg.id) it.copy(text = "Done", status = ChatMessageStatus.Complete) else it
                         }
@@ -369,6 +406,7 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun stopSession() {
+        RemoteLogger.log("session:end")
         userStopped = true
         reconnectJob?.cancel()
         reconnectJob = null
