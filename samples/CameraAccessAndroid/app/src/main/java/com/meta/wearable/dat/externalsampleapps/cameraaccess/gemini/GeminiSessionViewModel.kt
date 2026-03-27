@@ -21,6 +21,7 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.gallery.CapturedPho
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gallery.PhotoCaptureStore
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingMode
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -159,6 +160,9 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
         if (currentMessages.isNotEmpty()) {
             currentMessages.add(ChatMessage(role = ChatMessageRole.SessionDivider, text = ""))
         }
+
+        // Start foreground service to keep alive when screen is locked
+        StreamingService.start(getApplication())
 
         // Start with mic enabled by default
         _uiState.value = _uiState.value.copy(isGeminiActive = true, isMicEnabled = true, messages = currentMessages)
@@ -424,6 +428,7 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
 
     fun stopSession() {
         RemoteLogger.log("session:end")
+        StreamingService.stop(getApplication())
         userStopped = true
         reconnectJob?.cancel()
         reconnectJob = null
