@@ -37,15 +37,18 @@ struct StreamView: View {
       Color.black
         .edgesIgnoringSafeArea(.all)
 
-      if selectedTab == .camera {
+      TabView(selection: $selectedTab) {
         // --- Camera tab ---
         cameraContent
-      } else {
+          .tag(StreamTab.camera)
+
         // --- Chat tab ---
         ChatTranscriptView(geminiVM: geminiVM)
           .padding(.top, 60)
           .padding(.bottom, 80)
+          .tag(StreamTab.chat)
       }
+      .tabViewStyle(.page(indexDisplayMode: .never))
 
       // Top bar
       VStack {
@@ -62,15 +65,13 @@ struct StreamView: View {
               .background(Color.black.opacity(0.5))
               .clipShape(Circle())
           }
-          if geminiVM.isGeminiActive {
-            Picker("", selection: $selectedTab) {
-              ForEach(StreamTab.allCases, id: \.self) { tab in
-                Text(tab.rawValue).tag(tab)
-              }
+          Picker("", selection: $selectedTab) {
+            ForEach(StreamTab.allCases, id: \.self) { tab in
+              Text(tab.rawValue).tag(tab)
             }
-            .pickerStyle(.segmented)
-            .frame(width: 140)
           }
+          .pickerStyle(.segmented)
+          .frame(width: 140)
         }
         Spacer()
       }
