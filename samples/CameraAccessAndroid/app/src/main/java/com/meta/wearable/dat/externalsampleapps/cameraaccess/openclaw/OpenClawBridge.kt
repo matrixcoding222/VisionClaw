@@ -86,6 +86,7 @@ class OpenClawBridge {
                 .get()
                 .addHeader("Authorization", "Bearer ${GeminiConfig.openClawGatewayToken}")
                 .addHeader("x-openclaw-message-channel", "glass")
+                .addHeader("x-openclaw-scopes", "operator.write")
                 .build()
 
             val response = pingClient.newCall(request).execute()
@@ -224,6 +225,7 @@ class OpenClawBridge {
             .addHeader("Content-Type", "application/json")
             .addHeader("x-openclaw-session-key", sessionKey)
             .addHeader("x-openclaw-message-channel", "glass")
+            .addHeader("x-openclaw-scopes", "operator.write")
             .build()
 
         val call = client.newCall(request)
