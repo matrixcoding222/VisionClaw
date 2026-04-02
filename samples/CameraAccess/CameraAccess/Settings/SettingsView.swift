@@ -30,7 +30,7 @@ struct SettingsView: View {
         }
 
         if aiBackend == "mmduet2" {
-          Section(header: Text("MMDuet2"), footer: Text("URL of the MMDuet2 API server (e.g. http://your-gpu-server:8000). Set up SSH tunnel or use a public IP.")) {
+          Section(header: Text("MMDuet2"), footer: Text("URL of the MMDuet2 API server (e.g. http://Xiaoans-MacBook-Pro.local:8000). Set up SSH tunnel with -L 0.0.0.0:8000:localhost:8000 so your iPhone can reach it.")) {
             VStack(alignment: .leading, spacing: 4) {
               Text("Server URL")
                 .font(.caption)
@@ -42,91 +42,97 @@ struct SettingsView: View {
                 .font(.system(.body, design: .monospaced))
             }
           }
-        }
 
-        Section(header: Text("Gemini API")) {
-          VStack(alignment: .leading, spacing: 4) {
-            Text("API Key")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            TextField("Enter Gemini API key", text: $geminiAPIKey)
-              .autocapitalization(.none)
-              .disableAutocorrection(true)
-              .font(.system(.body, design: .monospaced))
+          Section(header: Text("Video"), footer: Text("Disable video streaming to save battery.")) {
+            Toggle("Video Streaming", isOn: $videoStreamingEnabled)
           }
         }
 
-        Section(header: Text("System Prompt"), footer: Text("Customize the AI assistant's behavior and personality. Changes take effect on the next Gemini session.")) {
-          TextEditor(text: $geminiSystemPrompt)
-            .font(.system(.body, design: .monospaced))
-            .frame(minHeight: 200)
-        }
-
-        Section(header: Text("OpenClaw"), footer: Text("Connect to an OpenClaw gateway running on your Mac for agentic tool-calling.")) {
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Host")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            TextField("http://your-mac.local", text: $openClawHost)
-              .autocapitalization(.none)
-              .disableAutocorrection(true)
-              .keyboardType(.URL)
-              .font(.system(.body, design: .monospaced))
+        if aiBackend == "gemini" {
+          Section(header: Text("Gemini API")) {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("API Key")
+                .font(.caption)
+                .foregroundColor(.secondary)
+              TextField("Enter Gemini API key", text: $geminiAPIKey)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+                .font(.system(.body, design: .monospaced))
+            }
           }
 
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Port")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            TextField("18789", text: $openClawPort)
-              .keyboardType(.numberPad)
+          Section(header: Text("System Prompt"), footer: Text("Customize the AI assistant's behavior and personality. Changes take effect on the next Gemini session.")) {
+            TextEditor(text: $geminiSystemPrompt)
               .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 200)
           }
 
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Hook Token")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            TextField("Hook token", text: $openClawHookToken)
-              .autocapitalization(.none)
-              .disableAutocorrection(true)
-              .font(.system(.body, design: .monospaced))
+          Section(header: Text("OpenClaw"), footer: Text("Connect to an OpenClaw gateway running on your Mac for agentic tool-calling.")) {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Host")
+                .font(.caption)
+                .foregroundColor(.secondary)
+              TextField("http://your-mac.local", text: $openClawHost)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+                .keyboardType(.URL)
+                .font(.system(.body, design: .monospaced))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Port")
+                .font(.caption)
+                .foregroundColor(.secondary)
+              TextField("18789", text: $openClawPort)
+                .keyboardType(.numberPad)
+                .font(.system(.body, design: .monospaced))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Hook Token")
+                .font(.caption)
+                .foregroundColor(.secondary)
+              TextField("Hook token", text: $openClawHookToken)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+                .font(.system(.body, design: .monospaced))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Gateway Token")
+                .font(.caption)
+                .foregroundColor(.secondary)
+              TextField("Gateway auth token", text: $openClawGatewayToken)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+                .font(.system(.body, design: .monospaced))
+            }
           }
 
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Gateway Token")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            TextField("Gateway auth token", text: $openClawGatewayToken)
-              .autocapitalization(.none)
-              .disableAutocorrection(true)
-              .font(.system(.body, design: .monospaced))
+          Section(header: Text("WebRTC")) {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Signaling URL")
+                .font(.caption)
+                .foregroundColor(.secondary)
+              TextField("wss://your-server.example.com", text: $webrtcSignalingURL)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+                .keyboardType(.URL)
+                .font(.system(.body, design: .monospaced))
+            }
           }
-        }
 
-        Section(header: Text("WebRTC")) {
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Signaling URL")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            TextField("wss://your-server.example.com", text: $webrtcSignalingURL)
-              .autocapitalization(.none)
-              .disableAutocorrection(true)
-              .keyboardType(.URL)
-              .font(.system(.body, design: .monospaced))
+          Section(header: Text("Audio"), footer: Text("Route audio output to the iPhone speaker instead of glasses. Useful for demos where others need to hear.")) {
+            Toggle("Speaker Output", isOn: $speakerOutputEnabled)
           }
-        }
 
-        Section(header: Text("Audio"), footer: Text("Route audio output to the iPhone speaker instead of glasses. Useful for demos where others need to hear.")) {
-          Toggle("Speaker Output", isOn: $speakerOutputEnabled)
-        }
+          Section(header: Text("Video"), footer: Text("Disable video streaming to save battery. Audio remains active for voice-only interaction.")) {
+            Toggle("Video Streaming", isOn: $videoStreamingEnabled)
+          }
 
-        Section(header: Text("Video"), footer: Text("Disable video streaming to save battery. Audio remains active for voice-only interaction.")) {
-          Toggle("Video Streaming", isOn: $videoStreamingEnabled)
-        }
-
-        Section(header: Text("Notifications"), footer: Text("Receive proactive updates from OpenClaw (heartbeat, scheduled tasks) spoken through the glasses.")) {
-          Toggle("Proactive Notifications", isOn: $proactiveNotificationsEnabled)
+          Section(header: Text("Notifications"), footer: Text("Receive proactive updates from OpenClaw (heartbeat, scheduled tasks) spoken through the glasses.")) {
+            Toggle("Proactive Notifications", isOn: $proactiveNotificationsEnabled)
+          }
         }
 
         Section {
