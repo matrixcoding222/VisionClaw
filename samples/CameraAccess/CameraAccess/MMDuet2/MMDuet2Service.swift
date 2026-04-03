@@ -86,7 +86,7 @@ class MMDuet2Service: ObservableObject {
           return
         }
         // Check KV cache and auto-reset if too large
-        if let kvLength = json["kv_length"] as? Int, kvLength > self.kvCacheResetThreshold {
+        if let kvLength = json["kv_length"] as? Int, kvLength > 15000 {
           print("[MMDuet2] KV cache at \(kvLength), auto-resetting...")
           Task { @MainActor [weak self] in
             self?.onAutoReset?()
