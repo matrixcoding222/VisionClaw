@@ -15,10 +15,10 @@ class MMDuet2Service: ObservableObject {
   var onProactiveResponse: ((String, Double) -> Void)?
   var onAutoReset: (() -> Void)?
   var lastQuestion: String = ""
+  private var isResetting = false
 
   private let sendQueue = DispatchQueue(label: "mmduet2.send", qos: .userInitiated)
   private var serverURL: String { SettingsManager.shared.mmDuet2ServerURL }
-  private let kvCacheResetThreshold = 15000
 
   // MARK: - Connection
 
@@ -48,15 +48,17 @@ class MMDuet2Service: ObservableObject {
 
   func reset() async {
     let url = URL(string: "\(serverURL)/reset")!
-    var request = URLRequest(url: url, timeoutInterval: 10)
+    var request = URLRequest(url: url, timeoutInterval: 60)
     request.httpMethod = "POST"
     _ = try? await URLSession.shared.data(for: request)
+    isResetting = false
+    print("[MMDuet2] Reset complete")
   }
 
   // MARK: - Send Video Frame
 
   func sendVideoFrame(image: UIImage) {
-    guard connectionState == .ready else { return }
+    guard connectionState == .ready, !isResetting else { return }
     sendQueue.async { [weak self] in
       guard let self else { return }
       guard let jpegData = image.jpegData(compressionQuality: 0.5) else { return }
@@ -86,7 +88,9 @@ class MMDuet2Service: ObservableObject {
           return
         }
         // Check KV cache and auto-reset if too large
-        if let kvLength = json["kv_length"] as? Int, kvLength > 15000 {
+        if let kvLength = json["kv_length"] as? Int, kvLength > 10000 {
+          guard let self, !self.isResetting else { return }
+          self.isResetting = true
           print("[MMDuet2] KV cache at \(kvLength), auto-resetting...")
           Task { @MainActor [weak self] in
             self?.onAutoReset?()
