@@ -73,11 +73,19 @@ class MMDuet2Service: ObservableObject {
       request.httpBody = body
 
       let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-        guard let data else { return }
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        if let error {
+          print("[MMDuet2] send frame error: \(error.localizedDescription)")
+          return
+        }
+        guard let data else { print("[MMDuet2] no data in response"); return }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+          print("[MMDuet2] failed to parse JSON")
+          return
+        }
         if let hasResponse = json["response"] as? Bool, hasResponse,
            let content = json["content"] as? String,
            let time = json["time"] as? Double {
+          print("[MMDuet2] PROACTIVE RESPONSE: [\(Int(time))s] \(content)")
           Task { @MainActor [weak self] in
             self?.onProactiveResponse?(content, time)
           }
@@ -90,7 +98,8 @@ class MMDuet2Service: ObservableObject {
   // MARK: - Send Text
 
   func sendText(_ text: String) {
-    guard connectionState == .ready else { return }
+    print("[MMDuet2] sendText: \(text)")
+    guard connectionState == .ready else { print("[MMDuet2] not ready, skipping text"); return }
     sendQueue.async { [weak self] in
       guard let self else { return }
       let url = URL(string: "\(self.serverURL)/add_text")!

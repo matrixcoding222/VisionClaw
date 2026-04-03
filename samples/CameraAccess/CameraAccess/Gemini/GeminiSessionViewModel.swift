@@ -368,6 +368,7 @@ class GeminiSessionViewModel: ObservableObject {
     mmDuet2Service.onProactiveResponse = { [weak self] content, time in
       guard let self else { return }
       let text = "[\(Int(time))s] \(content)"
+      print("[MMDuet2] Adding chat bubble: \(text)")
       let msg = ChatMessage(role: .assistant, text: text)
       self.messages.append(msg)
       ChatHistoryStore.save(self.messages)
