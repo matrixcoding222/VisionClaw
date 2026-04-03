@@ -99,13 +99,16 @@ class MMDuet2Service: ObservableObject {
           return
         }
 
+        let kvLength = json["kv_length"] as? Int ?? 0
         if let hasResponse = json["response"] as? Bool, hasResponse,
            let content = json["content"] as? String,
            let time = json["time"] as? Double {
-          print("[MMDuet2] PROACTIVE RESPONSE: [\(Int(time))s] \(content)")
+          print("[MMDuet2] RESPONSE: [\(Int(time))s] \(content) (kv: \(kvLength))")
           Task { @MainActor [weak self] in
             self?.onProactiveResponse?(content, time)
           }
+        } else {
+          print("[MMDuet2] NO REPLY (kv: \(kvLength))")
         }
       }
       task.resume()
