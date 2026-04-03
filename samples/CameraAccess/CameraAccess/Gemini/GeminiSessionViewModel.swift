@@ -305,6 +305,7 @@ class GeminiSessionViewModel: ObservableObject {
 
   func sendTextToMMDuet2(_ text: String) {
     guard isMMDuet2Mode, mmDuet2Service.connectionState == .ready else { return }
+    mmDuet2Service.lastQuestion = text
     mmDuet2Service.sendText(text)
     let msg = ChatMessage(role: .user, text: text)
     messages.append(msg)
@@ -366,6 +367,17 @@ class GeminiSessionViewModel: ObservableObject {
 
     if !messages.isEmpty {
       messages.append(ChatMessage(role: .sessionDivider, text: ""))
+    }
+
+    mmDuet2Service.onAutoReset = { [weak self] in
+      guard let self else { return }
+      print("[MMDuet2] Auto-resetting and resending last question")
+      Task {
+        await self.mmDuet2Service.reset()
+        if !self.mmDuet2Service.lastQuestion.isEmpty {
+          self.mmDuet2Service.sendText(self.mmDuet2Service.lastQuestion)
+        }
+      }
     }
 
     mmDuet2Service.onProactiveResponse = { [weak self] content, time in

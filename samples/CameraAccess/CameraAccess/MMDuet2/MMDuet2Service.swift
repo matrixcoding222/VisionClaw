@@ -13,9 +13,12 @@ class MMDuet2Service: ObservableObject {
   @Published var connectionState: MMDuet2ConnectionState = .disconnected
 
   var onProactiveResponse: ((String, Double) -> Void)?
+  var onAutoReset: (() -> Void)?
+  var lastQuestion: String = ""
 
   private let sendQueue = DispatchQueue(label: "mmduet2.send", qos: .userInitiated)
   private var serverURL: String { SettingsManager.shared.mmDuet2ServerURL }
+  private let kvCacheResetThreshold = 15000
 
   // MARK: - Connection
 
@@ -82,6 +85,15 @@ class MMDuet2Service: ObservableObject {
           print("[MMDuet2] failed to parse JSON")
           return
         }
+        // Check KV cache and auto-reset if too large
+        if let kvLength = json["kv_length"] as? Int, kvLength > self.kvCacheResetThreshold {
+          print("[MMDuet2] KV cache at \(kvLength), auto-resetting...")
+          Task { @MainActor [weak self] in
+            self?.onAutoReset?()
+          }
+          return
+        }
+
         if let hasResponse = json["response"] as? Bool, hasResponse,
            let content = json["content"] as? String,
            let time = json["time"] as? Double {
