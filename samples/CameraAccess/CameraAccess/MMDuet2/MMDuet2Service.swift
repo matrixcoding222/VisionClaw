@@ -16,6 +16,7 @@ class MMDuet2Service: ObservableObject {
   var onAutoReset: (() -> Void)?
   var lastQuestion: String = ""
   private var isResetting = false
+  private var isSendingFrame = false
 
   private let sendQueue = DispatchQueue(label: "mmduet2.send", qos: .userInitiated)
   private var serverURL: String { SettingsManager.shared.mmDuet2ServerURL }
@@ -58,10 +59,11 @@ class MMDuet2Service: ObservableObject {
   // MARK: - Send Video Frame
 
   func sendVideoFrame(image: UIImage) {
-    guard connectionState == .ready, !isResetting else { return }
+    guard connectionState == .ready, !isResetting, !isSendingFrame else { return }
+    isSendingFrame = true
     sendQueue.async { [weak self] in
       guard let self else { return }
-      guard let jpegData = image.jpegData(compressionQuality: 0.5) else { return }
+      guard let jpegData = image.jpegData(compressionQuality: 0.5) else { self.isSendingFrame = false; return }
 
       let boundary = UUID().uuidString
       let url = URL(string: "\(self.serverURL)/add_image")!
@@ -78,6 +80,7 @@ class MMDuet2Service: ObservableObject {
       request.httpBody = body
 
       let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        self?.isSendingFrame = false
         if let error {
           print("[MMDuet2] send frame error: \(error.localizedDescription)")
           return
