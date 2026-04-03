@@ -197,7 +197,7 @@ struct StreamView: View {
     }
 
     // Gemini speaking/transcript overlay on camera
-    if geminiVM.isGeminiActive {
+    if geminiVM.isGeminiActive && SettingsManager.shared.aiBackend == "gemini" {
       VStack {
         Spacer()
         VStack(spacing: 8) {
@@ -224,6 +224,25 @@ struct StreamView: View {
         .padding(.bottom, 80)
       }
       .padding(.horizontal, 24)
+    }
+
+    // MMDuet2 proactive response overlay on camera
+    if geminiVM.isGeminiActive && SettingsManager.shared.aiBackend == "mmduet2" && !geminiVM.mmDuet2LatestResponse.isEmpty {
+      VStack {
+        Spacer()
+        Text(geminiVM.mmDuet2LatestResponse)
+          .font(.system(size: 16, weight: .medium))
+          .foregroundColor(.white)
+          .multilineTextAlignment(.center)
+          .padding(.horizontal, 16)
+          .padding(.vertical, 12)
+          .background(Color.black.opacity(0.7))
+          .cornerRadius(16)
+          .padding(.bottom, 100)
+      }
+      .padding(.horizontal, 24)
+      .transition(.opacity)
+      .animation(.easeInOut(duration: 0.3), value: geminiVM.mmDuet2LatestResponse)
     }
   }
 }

@@ -25,6 +25,9 @@ class GeminiSessionViewModel: ObservableObject {
   private var stateObservation: Task<Void, Never>?
   private var isMMDuet2Mode: Bool { SettingsManager.shared.aiBackend == "mmduet2" }
 
+  // MMDuet2 latest response (shown on camera overlay)
+  @Published var mmDuet2LatestResponse: String = ""
+
   // Chat message tracking
   private var activeUserBubbleId: String?
   private var activeAIBubbleId: String?
@@ -369,6 +372,7 @@ class GeminiSessionViewModel: ObservableObject {
       guard let self else { return }
       let text = "[\(Int(time))s] \(content)"
       print("[MMDuet2] Adding chat bubble: \(text)")
+      self.mmDuet2LatestResponse = content
       let msg = ChatMessage(role: .assistant, text: text)
       self.messages.append(msg)
       ChatHistoryStore.save(self.messages)
