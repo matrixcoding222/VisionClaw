@@ -89,7 +89,7 @@ class MMDuet2Service: ObservableObject {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         // Check KV cache and auto-reset if too large
-        if let kvLength = json["kv_length"] as? Int, kvLength > 10000 {
+        if let kvLength = json["kv_length"] as? Int, kvLength > 30000 {
           guard let self, !self.isResetting else { return }
           self.isResetting = true
           print("[MMDuet2] KV cache at \(kvLength), auto-resetting...")
