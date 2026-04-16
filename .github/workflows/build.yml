@@ -1,0 +1,68 @@
+name: Build VisionClaw IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout VisionClaw
+        uses: actions/checkout@v4
+        with:
+          repository: sseanliu/VisionClaw
+          ref: main
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+
+      - name: Inject Secrets
+        run: |
+          cat > samples/CameraAccess/CameraAccess/Secrets.swift << 'SWIFT'
+          import Foundation
+
+          enum Secrets {
+            static let geminiAPIKey = "${{ secrets.GEMINI_API_KEY }}"
+            static let openClawHost = "http://${{ secrets.VPS_IP }}"
+            static let openClawPort = 18789
+            static let openClawHookToken = ""
+            static let openClawGatewayToken = "${{ secrets.OPENCLAW_GATEWAY_TOKEN }}"
+            static let webrtcSignalingURL = ""
+          }
+          SWIFT
+
+      - name: Resolve packages
+        run: |
+          cd samples/CameraAccess
+          xcodebuild -resolvePackageDependencies \
+            -project CameraAccess.xcodeproj \
+            -scheme CameraAccess
+
+      - name: Build archive (ad-hoc unsigned)
+        run: |
+          cd samples/CameraAccess
+          xcodebuild archive \
+            -project CameraAccess.xcodeproj \
+            -scheme CameraAccess \
+            -destination 'generic/platform=iOS' \
+            -archivePath $RUNNER_TEMP/CameraAccess.xcarchive \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
+
+      - name: Create IPA from archive
+        run: |
+          mkdir -p $RUNNER_TEMP/Payload
+          cp -r $RUNNER_TEMP/CameraAccess.xcarchive/Products/Applications/*.app $RUNNER_TEMP/Payload/
+          cd $RUNNER_TEMP
+          zip -r VisionClaw.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: VisionClaw-IPA
+          path: ${{ runner.temp }}/VisionClaw.ipa
+          retention-days: 30
