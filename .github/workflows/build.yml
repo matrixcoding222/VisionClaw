@@ -33,6 +33,11 @@ jobs:
           }
           SWIFT
 
+      - name: Patch AudioManager for SDK compatibility
+        run: |
+          sed -i '' 's/.allowBluetoothHFP/.allowBluetooth/g' \
+            samples/CameraAccess/CameraAccess/Gemini/AudioManager.swift
+
       - name: Resolve packages
         run: |
           cd samples/CameraAccess
