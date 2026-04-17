@@ -195,38 +195,35 @@ class GeminiLiveService: ObservableObject {
   }
 
   private func sendSetupMessage() {
-    // TEXT-only response — audio output is synthesized by Cartesia on the VPS.
-    // No thinkingConfig (2.5-only feature); removed for 2.0 compat.
-    let setup: [String: Any] = [
-      "setup": [
-        "model": GeminiConfig.model,
-        "generationConfig": [
-          "responseModalities": ["TEXT"]
+    // Minimal setup — empty inputAudioTranscription was causing server 1011.
+    // Build fields step by step; add optional ones conditionally.
+    var setupBody: [String: Any] = [
+      "model": GeminiConfig.model,
+      "generationConfig": [
+        "responseModalities": ["TEXT"]
+      ],
+      "systemInstruction": [
+        "parts": [
+          ["text": GeminiConfig.systemInstruction]
+        ]
+      ],
+      "tools": [
+        [
+          "functionDeclarations": ToolDeclarations.allDeclarations()
+        ]
+      ],
+      "realtimeInputConfig": [
+        "automaticActivityDetection": [
+          "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
+          "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
+          "silenceDurationMs": 500,
+          "prefixPaddingMs": 40
         ],
-        "systemInstruction": [
-          "parts": [
-            ["text": GeminiConfig.systemInstruction]
-          ]
-        ],
-        "tools": [
-          [
-            "functionDeclarations": ToolDeclarations.allDeclarations()
-          ]
-        ],
-        "realtimeInputConfig": [
-          "automaticActivityDetection": [
-            "disabled": false,
-            "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
-            "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
-            "silenceDurationMs": 500,
-            "prefixPaddingMs": 40
-          ],
-          "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
-          "turnCoverage": "TURN_INCLUDES_ALL_INPUT"
-        ],
-        "inputAudioTranscription": [:] as [String: Any]
+        "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
+        "turnCoverage": "TURN_INCLUDES_ALL_INPUT"
       ]
     ]
+    let setup: [String: Any] = ["setup": setupBody]
     sendJSON(setup)
   }
 
