@@ -65,15 +65,14 @@ class GeminiLiveService: ObservableObject {
         let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "no reason"
         NSLog("[Gemini] WS closed code=%d reason=%@", code.rawValue, reasonStr)
         Task { @MainActor in
-          // Surface the close reason as an error so the UI can show it.
-          // Apple's close codes: 1000 = normal; anything else here is unexpected during connect.
-          self.resolveConnect(success: false)
+          // Set state FIRST so the VM sees it when connect() returns
           if self.connectionState == .connecting || self.connectionState == .settingUp {
             self.connectionState = .error("WS closed \(code.rawValue): \(reasonStr)")
           } else {
             self.connectionState = .disconnected
           }
           self.isModelSpeaking = false
+          self.resolveConnect(success: false)
           self.onDisconnected?("Connection closed (code \(code.rawValue): \(reasonStr))")
         }
       }
@@ -82,9 +81,9 @@ class GeminiLiveService: ObservableObject {
         guard let self else { return }
         let msg = error?.localizedDescription ?? "Unknown error"
         Task { @MainActor in
-          self.resolveConnect(success: false)
           self.connectionState = .error(msg)
           self.isModelSpeaking = false
+          self.resolveConnect(success: false)
           self.onDisconnected?(msg)
         }
       }
@@ -96,10 +95,10 @@ class GeminiLiveService: ObservableObject {
       Task {
         try? await Task.sleep(nanoseconds: 15_000_000_000)
         await MainActor.run {
-          self.resolveConnect(success: false)
           if self.connectionState == .connecting || self.connectionState == .settingUp {
             self.connectionState = .error("Connection timed out")
           }
+          self.resolveConnect(success: false)
         }
       }
     }
