@@ -12,7 +12,7 @@ jobs:
       - name: Checkout VisionClaw
         uses: actions/checkout@v4
         with:
-          repository: sseanliu/VisionClaw
+          repository: matrixcoding222/VisionClaw
           ref: main
 
       - name: Select Xcode
