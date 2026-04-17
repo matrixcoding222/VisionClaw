@@ -158,10 +158,10 @@ class GeminiSessionViewModel: ObservableObject {
       var msg: String
       switch geminiService.connectionState {
       case .error(let err): msg = "Gemini error: \(err)"
-      case .disconnected: msg = "Gemini WS closed before setup completed"
-      case .connecting: msg = "Gemini stuck in connecting state (no response from server)"
-      case .settingUp: msg = "Gemini opened WS but never sent setupComplete"
-      case .ready: msg = "Gemini ready but setupOk=false (race)"
+      case .disconnected: msg = "Gemini .disconnected (state wasn't .error — check receive loop race)"
+      case .connecting: msg = "Gemini stuck in .connecting (no WS open)"
+      case .settingUp: msg = "Gemini stuck in .settingUp (no setupComplete)"
+      case .ready: msg = "Gemini ready but setupOk=false (continuation race)"
       }
       errorMessage = msg
       NSLog("[Gemini] connect failed: %@", msg)
@@ -171,13 +171,11 @@ class GeminiSessionViewModel: ObservableObject {
       isGeminiActive = false
       connectionState = .disconnected
 
-      // If this looks like a model-not-found error, fetch the list of models
-      // your API key can actually use and append them so we can pick the right one.
-      if msg.lowercased().contains("not found") || msg.lowercased().contains("not supported") {
-        Task { @MainActor in
-          if let live = await self.fetchLiveCapableModels() {
-            self.errorMessage = "\(msg)\n\nLive-capable models on your key:\n\(live)"
-          }
+      // Always fetch the live-capable models to append to the error,
+      // regardless of what the initial error text was — we need this info.
+      Task { @MainActor in
+        if let live = await self.fetchLiveCapableModels() {
+          self.errorMessage = "\(msg)\n\nTried model: \(GeminiConfig.model)\n\nLive-capable models on your key:\n\(live)"
         }
       }
       return
