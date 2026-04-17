@@ -144,10 +144,9 @@ class OpenClawBridge: ObservableObject {
 
 
 // MARK: - Direct JARVIS (bypasses Gemini)
-// Pipeline: iOS on-device STT -> OpenClaw bridge -> Cartesia TTS WebSocket -> AVAudioEngine playback
+// Pipeline: iOS STT -> OpenClaw bridge -> Cartesia TTS -> AVAudioEngine
 
 enum DirectJarvisConfig {
-  // Tailscale-served endpoints on the VPS
   static let bridgeURL = "https://jarvis-prime.tail89fc92.ts.net:9443/v1/chat/completions"
   static let bridgeToken = "C0ah61_XpQP2a3sziw6cNWr-ZoIGBbUDAadQJPdnhfs"
   static let ttsURL = "wss://jarvis-prime.tail89fc92.ts.net:8443/v1/tts/stream"
@@ -155,43 +154,18 @@ enum DirectJarvisConfig {
   static let sessionKey = "agent:main:direct-jarvis"
 }
 
-// MARK: PCM Player (24kHz s16le mono)
-final class PCMPlayer {
-  private let engine = AVAudioEngine()
-  private let player = AVAudioPlayerNode()
-  private let format = AVAudioFormat(commonFormat: .pcmFormatInt16,
-                                     sampleRate: 24000, channels: 1, interleaved: true)!
-
-  init() {
-    engine.attach(player)
-    engine.connect(player, to: engine.mainMixerNode, format: format)
+// MARK: Audio session helper
+enum DJAudio {
+  static func activate() throws {
+    let s = AVAudioSession.sharedInstance()
+    try s.setCategory(.playAndRecord,
+                      mode: .spokenAudio,
+                      options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+    try s.setActive(true, options: .notifyOthersOnDeactivation)
   }
 
-  func start() {
-    do {
-      try engine.start()
-      player.play()
-    } catch {
-      NSLog("[PCM] start failed: %@", error.localizedDescription)
-    }
-  }
-
-  func append(_ pcm: Data) {
-    let frames = UInt32(pcm.count / 2)
-    guard frames > 0,
-          let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return }
-    buf.frameLength = frames
-    pcm.withUnsafeBytes { raw in
-      let src = raw.bindMemory(to: Int16.self).baseAddress!
-      let dst = buf.int16ChannelData![0]
-      for i in 0..<Int(frames) { dst[i] = src[i] }
-    }
-    player.scheduleBuffer(buf, completionHandler: nil)
-  }
-
-  func stop() {
-    player.stop()
-    engine.stop()
+  static func deactivate() {
+    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
   }
 }
 
@@ -212,23 +186,27 @@ final class TTSStreamClient: NSObject {
   }
 
   func connect() {
-    let urlStr = "\(DirectJarvisConfig.ttsURL)?token=\(DirectJarvisConfig.ttsToken)"
-    guard let url = URL(string: urlStr) else {
+    guard let url = URL(string: "\(DirectJarvisConfig.ttsURL)?token=\(DirectJarvisConfig.ttsToken)") else {
       onError?("Invalid TTS URL")
       return
     }
     task = session.webSocketTask(with: url)
     task?.resume()
     receive()
+    NSLog("[DJ] TTS connecting to %@", url.absoluteString)
   }
 
   func speak(_ text: String) {
+    guard let task = task else {
+      onError?("TTS not connected")
+      return
+    }
     let escaped = text
       .replacingOccurrences(of: "\\", with: "\\\\")
       .replacingOccurrences(of: "\"", with: "\\\"")
       .replacingOccurrences(of: "\n", with: " ")
-    let msg = URLSessionWebSocketTask.Message.string("{\"text\":\"\(escaped)\"}")
-    task?.send(msg) { [weak self] err in
+    NSLog("[DJ] TTS speak: %@", String(text.prefix(80)))
+    task.send(.string("{\"text\":\"\(escaped)\"}")) { [weak self] err in
       if let err = err { self?.onError?("send: \(err.localizedDescription)") }
     }
   }
@@ -243,11 +221,11 @@ final class TTSStreamClient: NSObject {
           self.onPCM?(d)
         case .string(let s):
           if s.contains("\"done\":true") { self.onDone?() }
-        @unknown default:
-          break
+        @unknown default: break
         }
         self.receive()
       case .failure(let err):
+        NSLog("[DJ] TTS ws error: %@", err.localizedDescription)
         self.onError?("ws: \(err.localizedDescription)")
       }
     }
@@ -259,10 +237,74 @@ final class TTSStreamClient: NSObject {
   }
 }
 
-// MARK: Live Speech Recognizer (iOS on-device)
+// MARK: Shared audio engine (mic in + player out)
+@MainActor
+final class DJAudioEngine {
+  let engine = AVAudioEngine()
+  let player = AVAudioPlayerNode()
+  private(set) var isStarted = false
+
+  init() {
+    engine.attach(player)
+    engine.connect(player, to: engine.mainMixerNode, format: nil)
+  }
+
+  func start() throws {
+    guard !isStarted else { return }
+    engine.prepare()
+    try engine.start()
+    player.play()
+    isStarted = true
+    NSLog("[DJ] audio engine started")
+  }
+
+  func append(pcm: Data, sampleRate: Double = 24000) {
+    guard let format = AVAudioFormat(commonFormat: .pcmFormatInt16,
+                                     sampleRate: sampleRate, channels: 1,
+                                     interleaved: true) else { return }
+    let frames = UInt32(pcm.count / 2)
+    guard frames > 0,
+          let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return }
+    buf.frameLength = frames
+    pcm.withUnsafeBytes { raw in
+      guard let src = raw.bindMemory(to: Int16.self).baseAddress,
+            let dst = buf.int16ChannelData?[0] else { return }
+      for i in 0..<Int(frames) { dst[i] = src[i] }
+    }
+    player.scheduleBuffer(buf, at: nil, options: [], completionHandler: nil)
+  }
+
+  func stop() {
+    if isStarted {
+      player.stop()
+      engine.stop()
+      isStarted = false
+      NSLog("[DJ] audio engine stopped")
+    }
+  }
+
+  func installInputTap(onBuffer: @escaping (AVAudioPCMBuffer) -> Void) -> Bool {
+    let inputNode = engine.inputNode
+    let fmt = inputNode.outputFormat(forBus: 0)
+    guard fmt.sampleRate > 0 else {
+      NSLog("[DJ] input format invalid: %@", fmt)
+      return false
+    }
+    inputNode.installTap(onBus: 0, bufferSize: 1024, format: fmt) { buffer, _ in
+      onBuffer(buffer)
+    }
+    NSLog("[DJ] input tap installed at %.0fHz", fmt.sampleRate)
+    return true
+  }
+
+  func removeInputTap() {
+    engine.inputNode.removeTap(onBus: 0)
+  }
+}
+
+// MARK: Speech Recognizer
 final class LiveSpeechRecognizer: NSObject {
-  private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-AU"))
-  private let audioEngine = AVAudioEngine()
+  private let recognizer: SFSpeechRecognizer?
   private var request: SFSpeechAudioBufferRecognitionRequest?
   private var task: SFSpeechRecognitionTask?
 
@@ -270,46 +312,35 @@ final class LiveSpeechRecognizer: NSObject {
   var onFinal: ((String) -> Void)?
   var onError: ((String) -> Void)?
 
-  func requestAuth(_ done: @escaping (Bool) -> Void) {
+  override init() {
+    // Prefer en-AU, fall back to device default if unavailable
+    self.recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-AU"))
+      ?? SFSpeechRecognizer()
+    super.init()
+  }
+
+  func requestAuth(_ done: @escaping (Bool, String?) -> Void) {
     SFSpeechRecognizer.requestAuthorization { status in
-      guard status == .authorized else { done(false); return }
+      guard status == .authorized else {
+        done(false, "speech auth: \(status.rawValue)")
+        return
+      }
       AVAudioSession.sharedInstance().requestRecordPermission { granted in
-        done(granted)
+        done(granted, granted ? nil : "mic denied")
       }
     }
   }
 
-  func start() {
-    guard let recognizer = recognizer, recognizer.isAvailable else {
-      onError?("Speech recognizer unavailable")
-      return
-    }
-    stop()
-    request = SFSpeechAudioBufferRecognitionRequest()
-    request?.shouldReportPartialResults = true
-    if #available(iOS 13.0, *) {
-      request?.requiresOnDeviceRecognition = true
-    }
-
-    let inputNode = audioEngine.inputNode
-    let fmt = inputNode.outputFormat(forBus: 0)
-    inputNode.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buffer, _ in
-      self?.request?.append(buffer)
-    }
-
-    do {
-      let session = AVAudioSession.sharedInstance()
-      try session.setCategory(.playAndRecord, mode: .voiceChat,
-                              options: [.defaultToSpeaker, .allowBluetooth])
-      try session.setActive(true, options: .notifyOthersOnDeactivation)
-      audioEngine.prepare()
-      try audioEngine.start()
-    } catch {
-      onError?("audio: \(error.localizedDescription)")
-      return
-    }
-
-    task = recognizer.recognitionTask(with: request!) { [weak self] result, error in
+  // Returns (true, nil) on success; (false, reason) on failure
+  func begin() -> (Bool, String?) {
+    guard let recognizer = recognizer else { return (false, "no recognizer") }
+    guard recognizer.isAvailable else { return (false, "recognizer unavailable") }
+    end()
+    let req = SFSpeechAudioBufferRecognitionRequest()
+    req.shouldReportPartialResults = true
+    // NOT forcing on-device — falls back to Apple's cloud STT which is more reliable
+    self.request = req
+    self.task = recognizer.recognitionTask(with: req) { [weak self] result, error in
       guard let self = self else { return }
       if let result = result {
         let text = result.bestTranscription.formattedString
@@ -321,19 +352,22 @@ final class LiveSpeechRecognizer: NSObject {
       }
       if let error = error {
         let nsErr = error as NSError
-        // Code 1110 = no speech detected, 216 = canceled — not real errors
-        if nsErr.code != 1110 && nsErr.code != 216 {
+        // 1110 = no speech; 216/301 = canceled
+        if nsErr.code != 1110 && nsErr.code != 216 && nsErr.code != 301 {
+          NSLog("[DJ] STT err %d: %@", nsErr.code, error.localizedDescription)
           self.onError?(error.localizedDescription)
         }
       }
     }
+    NSLog("[DJ] STT session started")
+    return (true, nil)
   }
 
-  func stop() {
-    if audioEngine.isRunning {
-      audioEngine.stop()
-      audioEngine.inputNode.removeTap(onBus: 0)
-    }
+  func feed(_ buffer: AVAudioPCMBuffer) {
+    request?.append(buffer)
+  }
+
+  func end() {
     request?.endAudio()
     task?.cancel()
     request = nil
@@ -349,34 +383,50 @@ final class DirectJarvisService: ObservableObject {
   @Published var jarvisText: String = ""
   @Published var isActive: Bool = false
 
+  private let audio = DJAudioEngine()
   private let recognizer = LiveSpeechRecognizer()
   private let tts = TTSStreamClient()
-  private let player = PCMPlayer()
   private var history: [[String: String]] = []
   private var lastFinalAt: Date = .distantPast
 
   func start() {
-    recognizer.requestAuth { [weak self] ok in
+    NSLog("[DJ] start()")
+    status = "requesting permissions"
+    recognizer.requestAuth { [weak self] ok, err in
       Task { @MainActor in
         guard let self = self else { return }
-        guard ok else { self.status = "permission denied"; return }
+        guard ok else { self.status = err ?? "permission denied"; return }
         self.boot()
       }
     }
   }
 
   private func boot() {
-    isActive = true
-    status = "connecting"
-    player.start()
+    NSLog("[DJ] boot()")
+    status = "starting audio"
+    do {
+      try DJAudio.activate()
+    } catch {
+      status = "audio session: \(error.localizedDescription)"
+      NSLog("[DJ] audio session failed: %@", error.localizedDescription)
+      return
+    }
+
+    do {
+      try audio.start()
+    } catch {
+      status = "engine: \(error.localizedDescription)"
+      NSLog("[DJ] audio engine start failed: %@", error.localizedDescription)
+      return
+    }
 
     tts.onPCM = { [weak self] data in
-      Task { @MainActor in self?.player.append(data) }
+      Task { @MainActor in self?.audio.append(pcm: data) }
     }
     tts.onDone = { [weak self] in
       Task { @MainActor in
         self?.status = "listening"
-        self?.recognizer.start()
+        self?.startListening()
       }
     }
     tts.onError = { [weak self] e in
@@ -390,34 +440,54 @@ final class DirectJarvisService: ObservableObject {
     recognizer.onFinal = { [weak self] text in
       Task { @MainActor in
         guard let self = self else { return }
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-          self.recognizer.start()
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+          self.startListening()
           return
         }
-        // Debounce: ignore finals within 500ms
         if Date().timeIntervalSince(self.lastFinalAt) < 0.5 { return }
         self.lastFinalAt = Date()
-        self.userText = text
-        self.recognizer.stop()
-        await self.ask(text)
+        self.userText = trimmed
+        self.stopListening()
+        await self.ask(trimmed)
       }
     }
     recognizer.onError = { [weak self] e in
       Task { @MainActor in self?.status = "stt: \(e)" }
     }
+
+    isActive = true
+    startListening()
+  }
+
+  private func startListening() {
     status = "listening"
-    recognizer.start()
+    let (ok, reason) = recognizer.begin()
+    guard ok else {
+      status = "stt begin: \(reason ?? "?")"
+      return
+    }
+    let tapOk = audio.installInputTap { [weak self] buffer in
+      self?.recognizer.feed(buffer)
+    }
+    if !tapOk {
+      status = "input tap failed"
+    }
+  }
+
+  private func stopListening() {
+    audio.removeInputTap()
+    recognizer.end()
   }
 
   private func ask(_ text: String) async {
     status = "thinking"
+    NSLog("[DJ] ask: %@", text)
     history.append(["role": "user", "content": text])
-    if history.count > 20 {
-      history = Array(history.suffix(20))
-    }
+    if history.count > 20 { history = Array(history.suffix(20)) }
 
     guard let url = URL(string: DirectJarvisConfig.bridgeURL) else {
-      status = "bad url"; return
+      status = "bad bridge URL"; return
     }
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
@@ -426,46 +496,46 @@ final class DirectJarvisService: ObservableObject {
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.setValue(DirectJarvisConfig.sessionKey, forHTTPHeaderField: "x-openclaw-session-key")
     req.setValue("phone-direct", forHTTPHeaderField: "x-openclaw-message-channel")
-
-    let body: [String: Any] = [
-      "model": "openclaw",
-      "messages": history,
-      "stream": false
-    ]
+    let body: [String: Any] = ["model": "openclaw", "messages": history, "stream": false]
     req.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
     do {
       let (data, response) = try await URLSession.shared.data(for: req)
-      guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        status = "bridge HTTP \(code)"
-        recognizer.start()
-        return
+      guard let http = response as? HTTPURLResponse else {
+        status = "no http response"; startListening(); return
+      }
+      guard (200...299).contains(http.statusCode) else {
+        let bodyStr = String(data: data, encoding: .utf8) ?? ""
+        NSLog("[DJ] bridge HTTP %d: %@", http.statusCode, String(bodyStr.prefix(200)))
+        status = "bridge \(http.statusCode)"; startListening(); return
       }
       guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let choices = json["choices"] as? [[String: Any]],
             let first = choices.first,
             let msg = first["message"] as? [String: Any],
             let content = msg["content"] as? String, !content.isEmpty else {
-        status = "parse fail"
-        recognizer.start()
-        return
+        let preview = String(data: data, encoding: .utf8).map { String($0.prefix(300)) } ?? "(binary)"
+        NSLog("[DJ] bridge parse fail: %@", preview)
+        status = "parse fail"; startListening(); return
       }
       history.append(["role": "assistant", "content": content])
       jarvisText = content
       status = "speaking"
       tts.speak(content)
     } catch {
+      NSLog("[DJ] bridge error: %@", error.localizedDescription)
       status = "net: \(error.localizedDescription)"
-      recognizer.start()
+      startListening()
     }
   }
 
   func stop() {
+    NSLog("[DJ] stop()")
     isActive = false
-    recognizer.stop()
+    stopListening()
     tts.close()
-    player.stop()
+    audio.stop()
+    DJAudio.deactivate()
     status = "idle"
   }
 }
@@ -489,6 +559,7 @@ struct DirectJarvisView: View {
           Text(service.status)
             .foregroundColor(.green)
             .font(.caption.monospaced())
+            .lineLimit(2)
         }
         .padding()
 
