@@ -155,7 +155,7 @@ class GeminiSessionViewModel: ObservableObject {
     let setupOk = await geminiService.connect()
 
     if !setupOk {
-      let msg: String
+      var msg: String
       switch geminiService.connectionState {
       case .error(let err): msg = "Gemini error: \(err)"
       case .disconnected: msg = "Gemini WS closed before setup completed"
@@ -170,6 +170,16 @@ class GeminiSessionViewModel: ObservableObject {
       stateObservation = nil
       isGeminiActive = false
       connectionState = .disconnected
+
+      // If this looks like a model-not-found error, fetch the list of models
+      // your API key can actually use and append them so we can pick the right one.
+      if msg.lowercased().contains("not found") || msg.lowercased().contains("not supported") {
+        Task { @MainActor in
+          if let live = await self.fetchLiveCapableModels() {
+            self.errorMessage = "\(msg)\n\nLive-capable models on your key:\n\(live)"
+          }
+        }
+      }
       return
     }
 
@@ -222,5 +232,30 @@ class GeminiSessionViewModel: ObservableObject {
     guard now.timeIntervalSince(lastVideoFrameTime) >= GeminiConfig.videoFrameInterval else { return }
     lastVideoFrameTime = now
     geminiService.sendVideoFrame(image: image)
+  }
+
+  // Queries Google's Gemini API for models accessible with the configured key,
+  // filters to those that support bidiGenerateContent (Live API), returns
+  // a newline-separated string of their names.
+  private func fetchLiveCapableModels() async -> String? {
+    let key = GeminiConfig.apiKey
+    guard !key.isEmpty, key != "YOUR_GEMINI_API_KEY" else { return nil }
+    guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models?key=\(key)&pageSize=100") else { return nil }
+    do {
+      let (data, _) = try await URLSession.shared.data(from: url)
+      guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let models = json["models"] as? [[String: Any]] else { return nil }
+      var names: [String] = []
+      for m in models {
+        guard let name = m["name"] as? String,
+              let methods = m["supportedGenerationMethods"] as? [String] else { continue }
+        if methods.contains("bidiGenerateContent") {
+          names.append(name)
+        }
+      }
+      return names.isEmpty ? "(none support bidiGenerateContent)" : names.joined(separator: "\n")
+    } catch {
+      return "fetch failed: \(error.localizedDescription)"
+    }
   }
 }
