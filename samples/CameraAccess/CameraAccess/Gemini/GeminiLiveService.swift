@@ -263,10 +263,16 @@ class GeminiLiveService: ObservableObject {
         } catch {
           if !Task.isCancelled {
             let reason = error.localizedDescription
+            NSLog("[Gemini] receive error: %@", reason)
             await MainActor.run {
-              self.resolveConnect(success: false)
-              self.connectionState = .disconnected
+              // Surface as .error so connect's guard picks up the reason
+              if self.connectionState == .connecting || self.connectionState == .settingUp {
+                self.connectionState = .error("recv: \(reason)")
+              } else {
+                self.connectionState = .disconnected
+              }
               self.isModelSpeaking = false
+              self.resolveConnect(success: false)
               self.onDisconnected?(reason)
             }
           }

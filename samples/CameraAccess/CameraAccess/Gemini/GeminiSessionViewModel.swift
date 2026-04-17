@@ -156,12 +156,15 @@ class GeminiSessionViewModel: ObservableObject {
 
     if !setupOk {
       let msg: String
-      if case .error(let err) = geminiService.connectionState {
-        msg = err
-      } else {
-        msg = "Failed to connect to Gemini"
+      switch geminiService.connectionState {
+      case .error(let err): msg = "Gemini error: \(err)"
+      case .disconnected: msg = "Gemini WS closed before setup completed"
+      case .connecting: msg = "Gemini stuck in connecting state (no response from server)"
+      case .settingUp: msg = "Gemini opened WS but never sent setupComplete"
+      case .ready: msg = "Gemini ready but setupOk=false (race)"
       }
       errorMessage = msg
+      NSLog("[Gemini] connect failed: %@", msg)
       geminiService.disconnect()
       stateObservation?.cancel()
       stateObservation = nil
