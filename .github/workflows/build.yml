@@ -40,6 +40,19 @@ jobs:
           sed -i '' 's/.allowBluetoothHFP/.allowBluetooth/g' \
             samples/CameraAccess/CameraAccess/Gemini/AudioManager.swift
 
+      - name: Bake Meta wearables credentials into Info.plist
+        env:
+          META_APP_ID: ${{ secrets.META_APP_ID }}
+          CLIENT_TOKEN: ${{ secrets.CLIENT_TOKEN }}
+        run: |
+          PLIST=samples/CameraAccess/CameraAccess/Info.plist
+          # Use PlistBuddy for safe key-based substitution (value may contain '|' '/' etc)
+          /usr/libexec/PlistBuddy -c "Set :MWDAT:MetaAppID $META_APP_ID" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :MWDAT:ClientToken $CLIENT_TOKEN" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :MWDAT:TeamID " "$PLIST" || true
+          echo "--- MWDAT block after substitution ---"
+          /usr/libexec/PlistBuddy -c "Print :MWDAT" "$PLIST"
+
       - name: Resolve packages
         run: |
           cd samples/CameraAccess
