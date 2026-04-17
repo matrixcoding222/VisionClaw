@@ -158,12 +158,11 @@ class GeminiSessionViewModel: ObservableObject {
       var msg: String
       switch geminiService.connectionState {
       case .error(let err): msg = "Gemini error: \(err)"
-      case .disconnected: msg = "Gemini .disconnected (state wasn't .error — check receive loop race)"
+      case .disconnected: msg = "Gemini .disconnected (state wasn't .error — receive loop race)"
       case .connecting: msg = "Gemini stuck in .connecting (no WS open)"
       case .settingUp: msg = "Gemini stuck in .settingUp (no setupComplete)"
       case .ready: msg = "Gemini ready but setupOk=false (continuation race)"
       }
-      errorMessage = msg
       NSLog("[Gemini] connect failed: %@", msg)
       geminiService.disconnect()
       stateObservation?.cancel()
@@ -171,12 +170,11 @@ class GeminiSessionViewModel: ObservableObject {
       isGeminiActive = false
       connectionState = .disconnected
 
-      // Always fetch the live-capable models to append to the error,
-      // regardless of what the initial error text was — we need this info.
+      // Fetch models FIRST, THEN show the alert — iOS alerts don't update after
+      // they're displayed, so we need the full content before presenting.
       Task { @MainActor in
-        if let live = await self.fetchLiveCapableModels() {
-          self.errorMessage = "\(msg)\n\nTried model: \(GeminiConfig.model)\n\nLive-capable models on your key:\n\(live)"
-        }
+        let live = await self.fetchLiveCapableModels() ?? "(fetch failed)"
+        self.errorMessage = "\(msg)\n\nTried: \(GeminiConfig.model)\n\nAvailable:\n\(live)"
       }
       return
     }
