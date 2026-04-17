@@ -63,9 +63,16 @@ class GeminiLiveService: ObservableObject {
       self.delegate.onClose = { [weak self] code, reason in
         guard let self else { return }
         let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "no reason"
+        NSLog("[Gemini] WS closed code=%d reason=%@", code.rawValue, reasonStr)
         Task { @MainActor in
+          // Surface the close reason as an error so the UI can show it.
+          // Apple's close codes: 1000 = normal; anything else here is unexpected during connect.
           self.resolveConnect(success: false)
-          self.connectionState = .disconnected
+          if self.connectionState == .connecting || self.connectionState == .settingUp {
+            self.connectionState = .error("WS closed \(code.rawValue): \(reasonStr)")
+          } else {
+            self.connectionState = .disconnected
+          }
           self.isModelSpeaking = false
           self.onDisconnected?("Connection closed (code \(code.rawValue): \(reasonStr))")
         }
@@ -190,14 +197,12 @@ class GeminiLiveService: ObservableObject {
 
   private func sendSetupMessage() {
     // TEXT-only response — audio output is synthesized by Cartesia on the VPS.
+    // No thinkingConfig (2.5-only feature); removed for 2.0 compat.
     let setup: [String: Any] = [
       "setup": [
         "model": GeminiConfig.model,
         "generationConfig": [
-          "responseModalities": ["TEXT"],
-          "thinkingConfig": [
-            "thinkingBudget": 0
-          ]
+          "responseModalities": ["TEXT"]
         ],
         "systemInstruction": [
           "parts": [
