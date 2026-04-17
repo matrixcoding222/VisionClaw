@@ -25,8 +25,10 @@ jobs:
 
           enum Secrets {
             static let geminiAPIKey = "${{ secrets.GEMINI_API_KEY }}"
-            static let openClawHost = "http://${{ secrets.VPS_IP }}"
-            static let openClawPort = 18789
+            // Tailscale-served HTTPS endpoint (reachable from iOS over the tailnet,
+            // avoids ATS issues with plain HTTP on the public IP).
+            static let openClawHost = "https://jarvis-prime.tail89fc92.ts.net"
+            static let openClawPort = 443
             static let openClawHookToken = ""
             static let openClawGatewayToken = "${{ secrets.OPENCLAW_GATEWAY_TOKEN }}"
             static let webrtcSignalingURL = ""

@@ -2,7 +2,9 @@ import Foundation
 
 enum GeminiConfig {
   static let websocketBaseURL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
-  static let model = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+  // Use general Live model (supports TEXT output) instead of native-audio-only model.
+  // Gemini handles audio input + vision; TEXT output is sent to Cartesia for JARVIS voice.
+  static let model = "models/gemini-live-2.5-flash-preview"
 
   static let inputAudioSampleRate: Double = 16000
   static let outputAudioSampleRate: Double = 24000
