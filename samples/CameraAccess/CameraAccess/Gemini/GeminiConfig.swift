@@ -2,10 +2,10 @@ import Foundation
 
 enum GeminiConfig {
   static let websocketBaseURL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
-  // Current Gemini Live API model (Apr 2026). gemini-2.0-flash-live-001 was
-  // deprecated/removed from v1beta per server error. Using 2.5-flash-preview Live.
-  // Accepts audio+vision input; supports TEXT response modality.
-  static let model = "models/gemini-live-2.5-flash-preview"
+  // Gemini 3.1 flash-live-preview is the current Live model that supports
+  // TEXT response modality (the native-audio variants only support AUDIO out).
+  // Verified against Google's ListModels for this API key.
+  static let model = "models/gemini-3.1-flash-live-preview"
 
   static let inputAudioSampleRate: Double = 16000
   static let outputAudioSampleRate: Double = 24000
