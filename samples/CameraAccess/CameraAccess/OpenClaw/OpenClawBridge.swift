@@ -170,19 +170,24 @@ enum DJAudio {
 }
 
 // MARK: TTS WebSocket Client
-final class TTSStreamClient: NSObject {
-  private let session: URLSession
+final class TTSStreamClient: NSObject, URLSessionWebSocketDelegate {
+  private var session: URLSession!
   private var task: URLSessionWebSocketTask?
+  private var isOpen = false
+  private var pending: [String] = []
+  private var shouldReconnect = false
+  private var reconnectDelay: TimeInterval = 1
 
   var onPCM: ((Data) -> Void)?
   var onDone: (() -> Void)?
   var onError: ((String) -> Void)?
+  var onOpen: (() -> Void)?
 
   override init() {
+    super.init()
     let cfg = URLSessionConfiguration.default
     cfg.timeoutIntervalForRequest = 30
-    self.session = URLSession(configuration: cfg)
-    super.init()
+    self.session = URLSession(configuration: cfg, delegate: self, delegateQueue: .main)
   }
 
   func connect() {
@@ -190,24 +195,42 @@ final class TTSStreamClient: NSObject {
       onError?("Invalid TTS URL")
       return
     }
+    shouldReconnect = true
+    isOpen = false
     task = session.webSocketTask(with: url)
     task?.resume()
     receive()
     NSLog("[DJ] TTS connecting to %@", url.absoluteString)
   }
 
+  // Queues speak() if not yet open; sends immediately otherwise.
   func speak(_ text: String) {
-    guard let task = task else {
-      onError?("TTS not connected")
-      return
-    }
     let escaped = text
       .replacingOccurrences(of: "\\", with: "\\\\")
       .replacingOccurrences(of: "\"", with: "\\\"")
       .replacingOccurrences(of: "\n", with: " ")
-    NSLog("[DJ] TTS speak: %@", String(text.prefix(80)))
-    task.send(.string("{\"text\":\"\(escaped)\"}")) { [weak self] err in
-      if let err = err { self?.onError?("send: \(err.localizedDescription)") }
+    let payload = "{\"text\":\"\(escaped)\"}"
+    if isOpen, let task = task {
+      NSLog("[DJ] TTS speak (immediate): %@", String(text.prefix(80)))
+      task.send(.string(payload)) { [weak self] err in
+        if let err = err { self?.onError?("send: \(err.localizedDescription)") }
+      }
+    } else {
+      NSLog("[DJ] TTS speak (queued, not open yet): %@", String(text.prefix(80)))
+      pending.append(payload)
+      // If task is nil, (re)connect
+      if task == nil { connect() }
+    }
+  }
+
+  private func flushPending() {
+    guard isOpen, let task = task else { return }
+    let queued = pending
+    pending.removeAll()
+    for p in queued {
+      task.send(.string(p)) { [weak self] err in
+        if let err = err { self?.onError?("send: \(err.localizedDescription)") }
+      }
     }
   }
 
@@ -225,15 +248,43 @@ final class TTSStreamClient: NSObject {
         }
         self.receive()
       case .failure(let err):
-        NSLog("[DJ] TTS ws error: %@", err.localizedDescription)
+        NSLog("[DJ] TTS ws recv error: %@", err.localizedDescription)
+        self.isOpen = false
         self.onError?("ws: \(err.localizedDescription)")
+        // Auto-reconnect once with backoff
+        if self.shouldReconnect {
+          DispatchQueue.main.asyncAfter(deadline: .now() + self.reconnectDelay) { [weak self] in
+            guard let self = self, self.shouldReconnect else { return }
+            self.reconnectDelay = min(self.reconnectDelay * 2, 10)
+            self.connect()
+          }
+        }
       }
     }
   }
 
   func close() {
+    shouldReconnect = false
     task?.cancel(with: .normalClosure, reason: nil)
     task = nil
+    isOpen = false
+  }
+
+  // MARK: URLSessionWebSocketDelegate
+  func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
+                  didOpenWithProtocol protocol: String?) {
+    NSLog("[DJ] TTS ws OPEN")
+    isOpen = true
+    reconnectDelay = 1
+    onOpen?()
+    flushPending()
+  }
+
+  func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
+                  didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+    let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    NSLog("[DJ] TTS ws CLOSE code=%d reason=%@", closeCode.rawValue, reasonStr)
+    isOpen = false
   }
 }
 
@@ -589,17 +640,40 @@ struct DirectJarvisView: View {
 
         Spacer()
 
-        Button(action: {
-          if service.isActive { service.stop() } else { service.start() }
-        }) {
-          Image(systemName: service.isActive ? "stop.circle.fill" : "mic.circle.fill")
-            .resizable()
-            .aspectRatio(contentMode: .fit)
-            .frame(width: 100, height: 100)
-            .foregroundColor(service.isActive ? .red : .blue)
+        // Status orb (visual only, no button press required — matches VisionClaw continuous mode)
+        ZStack {
+          Circle()
+            .fill(orbColor)
+            .frame(width: 120, height: 120)
+            .shadow(color: orbColor.opacity(0.5), radius: 20)
+          Image(systemName: orbIcon)
+            .font(.system(size: 44))
+            .foregroundColor(.white)
         }
         .padding(.bottom, 60)
       }
+    }
+    .onAppear { service.start() }
+    .onDisappear { service.stop() }
+  }
+
+  private var orbColor: Color {
+    switch service.status {
+    case let s where s.starts(with: "listening"): return .blue
+    case let s where s.starts(with: "thinking"): return .yellow
+    case let s where s.starts(with: "speaking"): return .green
+    case let s where s.starts(with: "idle"): return .gray
+    default: return .red
+    }
+  }
+
+  private var orbIcon: String {
+    switch service.status {
+    case let s where s.starts(with: "listening"): return "waveform"
+    case let s where s.starts(with: "thinking"): return "ellipsis"
+    case let s where s.starts(with: "speaking"): return "speaker.wave.2.fill"
+    case let s where s.starts(with: "idle"): return "power"
+    default: return "exclamationmark.triangle"
     }
   }
 }
