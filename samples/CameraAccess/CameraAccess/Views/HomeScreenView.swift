@@ -19,7 +19,6 @@ import SwiftUI
 struct HomeScreenView: View {
   @ObservedObject var viewModel: WearablesViewModel
   @State private var showSettings = false
-  @State private var showDirectJarvis = false
 
   var body: some View {
     ZStack {
@@ -89,23 +88,12 @@ struct HomeScreenView: View {
           ) {
             viewModel.skipToIPhoneMode = true
           }
-
-          CustomButton(
-            title: "Direct JARVIS (voice)",
-            style: .secondary,
-            isDisabled: false
-          ) {
-            showDirectJarvis = true
-          }
         }
       }
       .padding(.all, 24)
     }
     .sheet(isPresented: $showSettings) {
       SettingsView()
-    }
-    .fullScreenCover(isPresented: $showDirectJarvis) {
-      DirectJarvisView()
     }
   }
 
