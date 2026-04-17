@@ -203,10 +203,23 @@ class GeminiLiveService: ObservableObject {
       "generationConfig": [
         "responseModalities": ["AUDIO"]
       ],
-      "outputAudioTranscription": [:] as [String: Any]
+      "outputAudioTranscription": [:] as [String: Any],
+      "systemInstruction": [
+        "parts": [
+          ["text": GeminiConfig.systemInstruction]
+        ]
+      ],
+      "tools": [
+        [
+          "functionDeclarations": ToolDeclarations.allDeclarations()
+        ]
+      ]
     ]
     let setup: [String: Any] = ["setup": setupBody]
-    NSLog("[Gemini] setup payload: %@", String(data: (try? JSONSerialization.data(withJSONObject: setup)) ?? Data(), encoding: .utf8) ?? "nil")
+    NSLog("[Gemini] setup: model=%@ systemInstruction=%d chars tools=%d",
+          GeminiConfig.model,
+          GeminiConfig.systemInstruction.count,
+          ToolDeclarations.allDeclarations().count)
     sendJSON(setup)
   }
 
