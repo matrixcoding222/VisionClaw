@@ -260,11 +260,16 @@ class GeminiLiveService: ObservableObject {
             let reason = error.localizedDescription
             NSLog("[Gemini] receive error: %@", reason)
             await MainActor.run {
-              // Surface as .error so connect's guard picks up the reason
-              if self.connectionState == .connecting || self.connectionState == .settingUp {
+              // Only upgrade state if it isn't already a specific error/disconnected —
+              // this avoids stomping on the onClose delegate that may have already fired
+              // with a more meaningful server close reason.
+              switch self.connectionState {
+              case .connecting, .settingUp:
                 self.connectionState = .error("recv: \(reason)")
-              } else {
+              case .ready:
                 self.connectionState = .disconnected
+              default:
+                break // keep whatever specific state was already set
               }
               self.isModelSpeaking = false
               self.resolveConnect(success: false)
