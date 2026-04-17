@@ -41,11 +41,12 @@ struct GeminiStatusBar: View {
   }
 
   private var openClawStatusText: String {
+    let ver = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
     switch geminiVM.openClawConnectionState {
-    case .connected: return "OpenClaw"
-    case .checking: return "OpenClaw..."
-    case .unreachable(let reason): return "Err: \(String(reason.prefix(200)))"
-    case .notConfigured: return "No OpenClaw"
+    case .connected: return "OpenClaw v\(ver)"
+    case .checking: return "OpenClaw... v\(ver)"
+    case .unreachable(let reason): return "v\(ver) Err: \(String(reason.prefix(180)))"
+    case .notConfigured: return "No OpenClaw v\(ver)"
     }
   }
 }
