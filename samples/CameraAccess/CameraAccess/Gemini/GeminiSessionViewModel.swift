@@ -1,9 +1,6 @@
 import Foundation
 import SwiftUI
 
-// Kept name `GeminiSessionViewModel` for minimal disruption; the brain is now
-// OpenClaw via DirectJarvisService. Same @Published surface so existing views
-// (StreamView, StreamSessionView, GeminiOverlayView) continue to work unchanged.
 @MainActor
 class GeminiSessionViewModel: ObservableObject {
   @Published var isGeminiActive: Bool = false
@@ -14,68 +11,181 @@ class GeminiSessionViewModel: ObservableObject {
   @Published var aiTranscript: String = ""
   @Published var toolCallStatus: ToolCallStatus = .idle
   @Published var openClawConnectionState: OpenClawConnectionState = .notConfigured
-
-  private let direct = DirectJarvisService()
+  private let geminiService = GeminiLiveService()
+  private let openClawBridge = OpenClawBridge()
+  private var toolCallRouter: ToolCallRouter?
+  private let audioManager = AudioManager()
+  private let eventClient = OpenClawEventClient()
+  private var lastVideoFrameTime: Date = .distantPast
   private var stateObservation: Task<Void, Never>?
 
   var streamingMode: StreamingMode = .glasses
 
   func startSession() async {
     guard !isGeminiActive else { return }
+
+    guard GeminiConfig.isConfigured else {
+      errorMessage = "Gemini API key not configured."
+      return
+    }
+
     isGeminiActive = true
-    connectionState = .connecting
-    openClawConnectionState = .checking
-    errorMessage = nil
-    userTranscript = ""
-    aiTranscript = ""
 
-    direct.start()
+    audioManager.onAudioCaptured = { [weak self] data in
+      guard let self else { return }
+      Task { @MainActor in
+        let speakerOnPhone = self.streamingMode == .iPhone || SettingsManager.shared.speakerOutputEnabled
+        if speakerOnPhone && self.geminiService.isModelSpeaking { return }
+        self.geminiService.sendAudio(data: data)
+      }
+    }
 
-    // Mirror direct service state into the @Published surface the UI reads.
+    geminiService.onAudioReceived = { [weak self] data in
+      self?.audioManager.playAudio(data: data)
+    }
+
+    geminiService.onInterrupted = { [weak self] in
+      self?.audioManager.stopPlayback()
+    }
+
+    geminiService.onTurnComplete = { [weak self] in
+      guard let self else { return }
+      Task { @MainActor in
+        self.userTranscript = ""
+      }
+    }
+
+    geminiService.onInputTranscription = { [weak self] text in
+      guard let self else { return }
+      Task { @MainActor in
+        self.userTranscript += text
+        self.aiTranscript = ""
+      }
+    }
+
+    geminiService.onOutputTranscription = { [weak self] text in
+      guard let self else { return }
+      Task { @MainActor in
+        self.aiTranscript += text
+      }
+    }
+
+    geminiService.onDisconnected = { [weak self] reason in
+      guard let self else { return }
+      Task { @MainActor in
+        guard self.isGeminiActive else { return }
+        self.stopSession()
+        self.errorMessage = "Connection lost: \(reason ?? "Unknown error")"
+      }
+    }
+
+    await openClawBridge.checkConnection()
+    openClawBridge.resetSession()
+
+    toolCallRouter = ToolCallRouter(bridge: openClawBridge)
+
+    geminiService.onToolCall = { [weak self] toolCall in
+      guard let self else { return }
+      Task { @MainActor in
+        for call in toolCall.functionCalls {
+          self.toolCallRouter?.handleToolCall(call) { [weak self] response in
+            self?.geminiService.sendToolResponse(response)
+          }
+        }
+      }
+    }
+
+    geminiService.onToolCallCancellation = { [weak self] cancellation in
+      guard let self else { return }
+      Task { @MainActor in
+        self.toolCallRouter?.cancelToolCalls(ids: cancellation.ids)
+      }
+    }
+
     stateObservation = Task { [weak self] in
       guard let self else { return }
       while !Task.isCancelled {
-        try? await Task.sleep(nanoseconds: 120_000_000)
-        guard !Task.isCancelled, self.isGeminiActive else { break }
-        self.userTranscript = self.direct.userText
-        self.aiTranscript = self.direct.jarvisText
-        let s = self.direct.status
-        if s.starts(with: "listening") || s.starts(with: "speaking") || s.starts(with: "thinking") {
-          self.connectionState = .ready
-          self.openClawConnectionState = .connected
-        } else if s.starts(with: "requesting") || s.starts(with: "starting") || s.starts(with: "connecting") {
-          self.connectionState = .connecting
-          self.openClawConnectionState = .checking
-        } else if s == "idle" {
-          self.connectionState = .disconnected
-        } else {
-          // Any other status is an error message from the service
-          self.connectionState = .error(s)
-          self.openClawConnectionState = .unreachable(s)
-        }
-        self.isModelSpeaking = s.starts(with: "speaking")
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        guard !Task.isCancelled else { break }
+        self.connectionState = self.geminiService.connectionState
+        self.isModelSpeaking = self.geminiService.isModelSpeaking
+        self.toolCallStatus = self.openClawBridge.lastToolCallStatus
+        self.openClawConnectionState = self.openClawBridge.connectionState
       }
+    }
+
+    do {
+      try audioManager.setupAudioSession(useIPhoneMode: streamingMode == .iPhone)
+    } catch {
+      errorMessage = "Audio setup failed: \(error.localizedDescription)"
+      isGeminiActive = false
+      return
+    }
+
+    let setupOk = await geminiService.connect()
+
+    if !setupOk {
+      let msg: String
+      if case .error(let err) = geminiService.connectionState {
+        msg = err
+      } else {
+        msg = "Failed to connect to Gemini"
+      }
+      errorMessage = msg
+      geminiService.disconnect()
+      stateObservation?.cancel()
+      stateObservation = nil
+      isGeminiActive = false
+      connectionState = .disconnected
+      return
+    }
+
+    do {
+      try audioManager.startCapture()
+    } catch {
+      errorMessage = "Mic capture failed: \(error.localizedDescription)"
+      geminiService.disconnect()
+      stateObservation?.cancel()
+      stateObservation = nil
+      isGeminiActive = false
+      connectionState = .disconnected
+      return
+    }
+
+    if SettingsManager.shared.proactiveNotificationsEnabled {
+      eventClient.onNotification = { [weak self] text in
+        guard let self else { return }
+        Task { @MainActor in
+          guard self.isGeminiActive, self.connectionState == .ready else { return }
+          self.geminiService.sendTextMessage(text)
+        }
+      }
+      eventClient.connect()
     }
   }
 
   func stopSession() {
-    direct.stop()
+    eventClient.disconnect()
+    toolCallRouter?.cancelAll()
+    toolCallRouter = nil
+    audioManager.stopCapture()
+    geminiService.disconnect()
     stateObservation?.cancel()
     stateObservation = nil
     isGeminiActive = false
     connectionState = .disconnected
-    openClawConnectionState = .notConfigured
     isModelSpeaking = false
     userTranscript = ""
     aiTranscript = ""
     toolCallStatus = .idle
   }
 
-  // Video frames — OpenClaw bridge doesn't currently accept image input per-turn.
-  // Keeping the signature so callers (StreamView) don't need to change.
-  // When/if we wire vision context into OpenClaw turns, this is the hook.
   func sendVideoFrameIfThrottled(image: UIImage) {
-    // no-op for now; visual context will be handled via separate context capture
-    _ = image
+    guard SettingsManager.shared.videoStreamingEnabled else { return }
+    guard isGeminiActive, connectionState == .ready else { return }
+    let now = Date()
+    guard now.timeIntervalSince(lastVideoFrameTime) >= GeminiConfig.videoFrameInterval else { return }
+    lastVideoFrameTime = now
+    geminiService.sendVideoFrame(image: image)
   }
 }
