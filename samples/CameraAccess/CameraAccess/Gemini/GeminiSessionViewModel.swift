@@ -16,8 +16,11 @@ class GeminiSessionViewModel: ObservableObject {
   private var toolCallRouter: ToolCallRouter?
   private let audioManager = AudioManager()
   private let eventClient = OpenClawEventClient()
+  private let tts = TTSStreamClient()
   private var lastVideoFrameTime: Date = .distantPast
   private var stateObservation: Task<Void, Never>?
+  // Text buffered across a Gemini turn; flushed to Cartesia TTS on turnComplete
+  private var turnTextBuffer: String = ""
 
   var streamingMode: StreamingMode = .glasses
 
@@ -40,18 +43,29 @@ class GeminiSessionViewModel: ObservableObject {
       }
     }
 
+    // Gemini is TEXT-only now; onAudioReceived won't fire. Leaving handler for defence.
     geminiService.onAudioReceived = { [weak self] data in
       self?.audioManager.playAudio(data: data)
     }
 
     geminiService.onInterrupted = { [weak self] in
       self?.audioManager.stopPlayback()
+      self?.turnTextBuffer = ""
     }
 
     geminiService.onTurnComplete = { [weak self] in
       guard let self else { return }
       Task { @MainActor in
         self.userTranscript = ""
+        // Flush accumulated text to Cartesia TTS
+        let text = self.turnTextBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.turnTextBuffer = ""
+        if !text.isEmpty {
+          NSLog("[TTS] flushing turn: %@", String(text.prefix(120)))
+          // Keep mic gated while TTS plays (prevents echo-as-input loop)
+          self.geminiService.markModelSpeakingStarted()
+          self.tts.speak(text)
+        }
       }
     }
 
@@ -67,8 +81,24 @@ class GeminiSessionViewModel: ObservableObject {
       guard let self else { return }
       Task { @MainActor in
         self.aiTranscript += text
+        self.turnTextBuffer += text
       }
     }
+
+    // Wire Cartesia TTS to phone speaker via AudioManager (same sink Gemini used).
+    tts.onPCM = { [weak self] data in
+      self?.audioManager.playAudio(data: data)
+    }
+    tts.onDone = { [weak self] in
+      Task { @MainActor in
+        // TTS finished speaking this turn
+        self?.geminiService.markModelSpeakingFinished()
+      }
+    }
+    tts.onError = { e in
+      NSLog("[TTS] err: %@", e)
+    }
+    tts.connect()
 
     geminiService.onDisconnected = { [weak self] reason in
       guard let self else { return }
@@ -169,6 +199,8 @@ class GeminiSessionViewModel: ObservableObject {
     toolCallRouter?.cancelAll()
     toolCallRouter = nil
     audioManager.stopCapture()
+    tts.close()
+    turnTextBuffer = ""
     geminiService.disconnect()
     stateObservation?.cancel()
     stateObservation = nil

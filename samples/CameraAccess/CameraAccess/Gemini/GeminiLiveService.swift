@@ -115,6 +115,17 @@ class GeminiLiveService: ObservableObject {
     resolveConnect(success: false)
   }
 
+  // Called by the session view model when Cartesia TTS finishes streaming.
+  // In TEXT-only mode, Gemini's own turnComplete happens before audio playback,
+  // so we need an external signal to know when the model is truly done speaking.
+  func markModelSpeakingFinished() {
+    isModelSpeaking = false
+  }
+
+  func markModelSpeakingStarted() {
+    isModelSpeaking = true
+  }
+
   func sendAudio(data: Data) {
     guard connectionState == .ready else { return }
     sendQueue.async { [weak self] in
@@ -178,11 +189,12 @@ class GeminiLiveService: ObservableObject {
   }
 
   private func sendSetupMessage() {
+    // TEXT-only response — audio output is synthesized by Cartesia on the VPS.
     let setup: [String: Any] = [
       "setup": [
         "model": GeminiConfig.model,
         "generationConfig": [
-          "responseModalities": ["AUDIO"],
+          "responseModalities": ["TEXT"],
           "thinkingConfig": [
             "thinkingBudget": 0
           ]
@@ -213,8 +225,7 @@ class GeminiLiveService: ObservableObject {
             "targetTokens": 80000
           ]
         ],
-        "inputAudioTranscription": [:] as [String: Any],
-        "outputAudioTranscription": [:] as [String: Any]
+        "inputAudioTranscription": [:] as [String: Any]
       ]
     ]
     sendJSON(setup)
@@ -324,8 +335,17 @@ class GeminiLiveService: ObservableObject {
               }
             }
             onAudioReceived?(audioData)
-          } else if let text = part["text"] as? String {
-            NSLog("[Gemini] %@", text)
+          } else if let text = part["text"] as? String, !text.isEmpty {
+            NSLog("[Gemini] AI text: %@", text)
+            if !isModelSpeaking {
+              isModelSpeaking = true
+              if let speechEnd = lastUserSpeechEnd, !responseLatencyLogged {
+                let latency = Date().timeIntervalSince(speechEnd)
+                NSLog("[Latency] %.0fms (user speech end -> first text)", latency * 1000)
+                responseLatencyLogged = true
+              }
+            }
+            onOutputTranscription?(text)
           }
         }
       }
