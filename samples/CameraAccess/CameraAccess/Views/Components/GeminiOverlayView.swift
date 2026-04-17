@@ -44,7 +44,7 @@ struct GeminiStatusBar: View {
     switch geminiVM.openClawConnectionState {
     case .connected: return "OpenClaw"
     case .checking: return "OpenClaw..."
-    case .unreachable(let reason): return "Err: \(String(reason.prefix(40)))"
+    case .unreachable(let reason): return "Err: \(String(reason.prefix(200)))"
     case .notConfigured: return "No OpenClaw"
     }
   }
