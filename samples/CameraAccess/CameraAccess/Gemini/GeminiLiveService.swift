@@ -195,35 +195,15 @@ class GeminiLiveService: ObservableObject {
   }
 
   private func sendSetupMessage() {
-    // Minimal setup — empty inputAudioTranscription was causing server 1011.
-    // Build fields step by step; add optional ones conditionally.
-    var setupBody: [String: Any] = [
+    // Absolute minimum setup — we'll add fields back once we see 1011 go away.
+    let setupBody: [String: Any] = [
       "model": GeminiConfig.model,
       "generationConfig": [
         "responseModalities": ["TEXT"]
-      ],
-      "systemInstruction": [
-        "parts": [
-          ["text": GeminiConfig.systemInstruction]
-        ]
-      ],
-      "tools": [
-        [
-          "functionDeclarations": ToolDeclarations.allDeclarations()
-        ]
-      ],
-      "realtimeInputConfig": [
-        "automaticActivityDetection": [
-          "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
-          "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
-          "silenceDurationMs": 500,
-          "prefixPaddingMs": 40
-        ],
-        "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
-        "turnCoverage": "TURN_INCLUDES_ALL_INPUT"
       ]
     ]
     let setup: [String: Any] = ["setup": setupBody]
+    NSLog("[Gemini] setup payload: %@", String(data: (try? JSONSerialization.data(withJSONObject: setup)) ?? Data(), encoding: .utf8) ?? "nil")
     sendJSON(setup)
   }
 
