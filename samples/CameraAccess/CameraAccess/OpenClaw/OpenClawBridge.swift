@@ -149,7 +149,9 @@ class OpenClawBridge: ObservableObject {
 enum DirectJarvisConfig {
   static let bridgeURL = "https://jarvis-prime.tail89fc92.ts.net:9443/v1/chat/completions"
   static let bridgeToken = "C0ah61_XpQP2a3sziw6cNWr-ZoIGBbUDAadQJPdnhfs"
-  static let ttsURL = "wss://jarvis-prime.tail89fc92.ts.net:8443/v1/tts/stream"
+  // Served on port 443 with /tts/ path prefix (Tailscale strips the prefix).
+  // iOS WebSocket is reliable on 443; arbitrary high ports were flaky.
+  static let ttsURL = "wss://jarvis-prime.tail89fc92.ts.net/tts/v1/tts/stream"
   static let ttsToken = "hYZB5CC9FFAdMNpABbEhSWfjjE4ilfti"
   static let sessionKey = "agent:main:direct-jarvis"
 }
