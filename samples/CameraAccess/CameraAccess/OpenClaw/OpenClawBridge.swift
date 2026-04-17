@@ -147,12 +147,12 @@ class OpenClawBridge: ObservableObject {
 // Pipeline: iOS STT -> OpenClaw bridge -> Cartesia TTS -> AVAudioEngine
 
 enum DirectJarvisConfig {
-  static let bridgeURL = "https://jarvis-prime.tail89fc92.ts.net:9443/v1/chat/completions"
+  // All traffic goes to port 443 behind Tailscale Serve with path-based routing.
+  static let bridgeURL = "https://jarvis-prime.tail89fc92.ts.net/bridge/v1/chat/completions"
   static let bridgeToken = "C0ah61_XpQP2a3sziw6cNWr-ZoIGBbUDAadQJPdnhfs"
-  // Served on port 443 with /tts/ path prefix (Tailscale strips the prefix).
-  // iOS WebSocket is reliable on 443; arbitrary high ports were flaky.
-  static let ttsURL = "wss://jarvis-prime.tail89fc92.ts.net/tts/v1/tts/stream"
-  static let ttsToken = "hYZB5CC9FFAdMNpABbEhSWfjjE4ilfti"
+  // HTTP streaming TTS — bridge proxies to Cartesia HTTP and chunks PCM back.
+  // (iOS URLSession WebSocket was unreliable on Tailscale Serve.)
+  static let ttsURL = "https://jarvis-prime.tail89fc92.ts.net/bridge/v1/tts/synth"
   static let sessionKey = "agent:main:direct-jarvis"
 }
 
@@ -171,14 +171,13 @@ enum DJAudio {
   }
 }
 
-// MARK: TTS WebSocket Client
-final class TTSStreamClient: NSObject, URLSessionWebSocketDelegate {
+// MARK: TTS HTTP Streaming Client
+// Replaces the WebSocket-based client. We POST to the bridge with JSON {"text"}
+// and receive a chunked HTTP response of raw PCM s16le 24kHz mono.
+// iOS URLSession streams the body via URLSessionDataDelegate callbacks.
+final class TTSStreamClient: NSObject, URLSessionDataDelegate {
   private var session: URLSession!
-  private var task: URLSessionWebSocketTask?
-  private var isOpen = false
-  private var pending: [String] = []
-  private var shouldReconnect = false
-  private var reconnectDelay: TimeInterval = 1
+  private var task: URLSessionDataTask?
 
   var onPCM: ((Data) -> Void)?
   var onDone: (() -> Void)?
@@ -189,104 +188,65 @@ final class TTSStreamClient: NSObject, URLSessionWebSocketDelegate {
     super.init()
     let cfg = URLSessionConfiguration.default
     cfg.timeoutIntervalForRequest = 30
+    cfg.timeoutIntervalForResource = 120
     self.session = URLSession(configuration: cfg, delegate: self, delegateQueue: .main)
   }
 
+  // Idempotent; HTTP is request/response so "connect" just signals readiness.
   func connect() {
-    guard let url = URL(string: "\(DirectJarvisConfig.ttsURL)?token=\(DirectJarvisConfig.ttsToken)") else {
+    onOpen?()
+  }
+
+  func speak(_ text: String) {
+    guard let url = URL(string: DirectJarvisConfig.ttsURL) else {
       onError?("Invalid TTS URL")
       return
     }
-    shouldReconnect = true
-    isOpen = false
-    task = session.webSocketTask(with: url)
+    task?.cancel()
+    var req = URLRequest(url: url)
+    req.httpMethod = "POST"
+    req.setValue("Bearer \(DirectJarvisConfig.bridgeToken)", forHTTPHeaderField: "Authorization")
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    req.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+    let body: [String: Any] = ["text": text]
+    req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+    NSLog("[DJ] TTS POST: %@", String(text.prefix(80)))
+    task = session.dataTask(with: req)
     task?.resume()
-    receive()
-    NSLog("[DJ] TTS connecting to %@", url.absoluteString)
-  }
-
-  // Queues speak() if not yet open; sends immediately otherwise.
-  func speak(_ text: String) {
-    let escaped = text
-      .replacingOccurrences(of: "\\", with: "\\\\")
-      .replacingOccurrences(of: "\"", with: "\\\"")
-      .replacingOccurrences(of: "\n", with: " ")
-    let payload = "{\"text\":\"\(escaped)\"}"
-    if isOpen, let task = task {
-      NSLog("[DJ] TTS speak (immediate): %@", String(text.prefix(80)))
-      task.send(.string(payload)) { [weak self] err in
-        if let err = err { self?.onError?("send: \(err.localizedDescription)") }
-      }
-    } else {
-      NSLog("[DJ] TTS speak (queued, not open yet): %@", String(text.prefix(80)))
-      pending.append(payload)
-      // If task is nil, (re)connect
-      if task == nil { connect() }
-    }
-  }
-
-  private func flushPending() {
-    guard isOpen, let task = task else { return }
-    let queued = pending
-    pending.removeAll()
-    for p in queued {
-      task.send(.string(p)) { [weak self] err in
-        if let err = err { self?.onError?("send: \(err.localizedDescription)") }
-      }
-    }
-  }
-
-  private func receive() {
-    task?.receive { [weak self] result in
-      guard let self = self else { return }
-      switch result {
-      case .success(let message):
-        switch message {
-        case .data(let d):
-          self.onPCM?(d)
-        case .string(let s):
-          if s.contains("\"done\":true") { self.onDone?() }
-        @unknown default: break
-        }
-        self.receive()
-      case .failure(let err):
-        NSLog("[DJ] TTS ws recv error: %@", err.localizedDescription)
-        self.isOpen = false
-        self.onError?("ws: \(err.localizedDescription)")
-        // Auto-reconnect once with backoff
-        if self.shouldReconnect {
-          DispatchQueue.main.asyncAfter(deadline: .now() + self.reconnectDelay) { [weak self] in
-            guard let self = self, self.shouldReconnect else { return }
-            self.reconnectDelay = min(self.reconnectDelay * 2, 10)
-            self.connect()
-          }
-        }
-      }
-    }
   }
 
   func close() {
-    shouldReconnect = false
-    task?.cancel(with: .normalClosure, reason: nil)
+    task?.cancel()
     task = nil
-    isOpen = false
   }
 
-  // MARK: URLSessionWebSocketDelegate
-  func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
-                  didOpenWithProtocol protocol: String?) {
-    NSLog("[DJ] TTS ws OPEN")
-    isOpen = true
-    reconnectDelay = 1
-    onOpen?()
-    flushPending()
+  // MARK: URLSessionDataDelegate
+  func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+    onPCM?(data)
   }
 
-  func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
-                  didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-    let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-    NSLog("[DJ] TTS ws CLOSE code=%d reason=%@", closeCode.rawValue, reasonStr)
-    isOpen = false
+  func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    if let error = error {
+      let nsErr = error as NSError
+      // Ignore cancels from us
+      if nsErr.domain == NSURLErrorDomain && nsErr.code == NSURLErrorCancelled { return }
+      NSLog("[DJ] TTS stream error: %@", error.localizedDescription)
+      onError?("\(nsErr.domain) #\(nsErr.code): \(error.localizedDescription)")
+    } else {
+      onDone?()
+    }
+  }
+
+  // Observe HTTP response so we can surface non-200 errors cleanly.
+  func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
+                  didReceive response: URLResponse,
+                  completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+    if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+      onError?("HTTP \(http.statusCode)")
+      completionHandler(.cancel)
+      return
+    }
+    completionHandler(.allow)
   }
 }
 
