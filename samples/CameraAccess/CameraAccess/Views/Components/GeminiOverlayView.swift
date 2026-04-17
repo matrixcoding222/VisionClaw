@@ -4,12 +4,18 @@ struct GeminiStatusBar: View {
   @ObservedObject var geminiVM: GeminiSessionViewModel
 
   var body: some View {
-    HStack(spacing: 8) {
-      // Gemini connection pill
-      StatusPill(color: geminiStatusColor, text: geminiStatusText)
-
-      // OpenClaw connection pill
-      StatusPill(color: openClawStatusColor, text: openClawStatusText)
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: 8) {
+        StatusPill(color: geminiStatusColor, text: geminiStatusText)
+        StatusPill(color: openClawStatusColor, text: openClawStatusText)
+      }
+      Text(geminiVM.ttsDebug)
+        .font(.caption2.monospaced())
+        .foregroundColor(.white)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Color.black.opacity(0.6))
+        .cornerRadius(8)
     }
   }
 
