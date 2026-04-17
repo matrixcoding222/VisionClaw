@@ -43,9 +43,10 @@ class GeminiSessionViewModel: ObservableObject {
       }
     }
 
-    // Gemini is TEXT-only now; onAudioReceived won't fire. Leaving handler for defence.
-    geminiService.onAudioReceived = { [weak self] data in
-      self?.audioManager.playAudio(data: data)
+    // Gemini is AUDIO modality (TEXT is rejected by 3.x Live models). We drop its
+    // audio and use outputAudioTranscription text → Cartesia TTS for JARVIS voice.
+    geminiService.onAudioReceived = { _ in
+      // intentionally discard Gemini's audio output
     }
 
     geminiService.onInterrupted = { [weak self] in

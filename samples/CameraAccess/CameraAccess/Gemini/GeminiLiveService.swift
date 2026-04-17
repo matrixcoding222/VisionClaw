@@ -195,12 +195,15 @@ class GeminiLiveService: ObservableObject {
   }
 
   private func sendSetupMessage() {
-    // Absolute minimum setup — we'll add fields back once we see 1011 go away.
+    // Try AUDIO modality — many 3.x Live models reject TEXT.
+    // If this connects, we route Gemini's audio output transcriptions to Cartesia
+    // instead of playing the audio directly.
     let setupBody: [String: Any] = [
       "model": GeminiConfig.model,
       "generationConfig": [
-        "responseModalities": ["TEXT"]
-      ]
+        "responseModalities": ["AUDIO"]
+      ],
+      "outputAudioTranscription": [:] as [String: Any]
     ]
     let setup: [String: Any] = ["setup": setupBody]
     NSLog("[Gemini] setup payload: %@", String(data: (try? JSONSerialization.data(withJSONObject: setup)) ?? Data(), encoding: .utf8) ?? "nil")
